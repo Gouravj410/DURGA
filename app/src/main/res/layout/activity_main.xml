@@ -19,13 +19,13 @@
             android:orientation="vertical"
             android:padding="20dp">
 
-            <!-- App Top Bar -->
+            <!-- Top Header & Role Switcher Bar -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="8dp">
 
                 <ImageView
                     android:id="@+id/ivLogo"
@@ -60,288 +60,753 @@
                         android:textSize="11sp" />
                 </LinearLayout>
 
-                <!-- Current Role Badge -->
-                <TextView
-                    android:id="@+id/tvRoleBadge"
+                <!-- Interactive Role Switcher Badge -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSwitchRole"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:layout_height="36dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="0dp"
+                    android:paddingBottom="0dp"
                     android:text="ROLE: USER"
-                    android:textColor="@color/durga_blue_accent"
                     android:textSize="11sp"
                     android:textStyle="bold"
-                    android:background="@drawable/bg_status_badge"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
-                    android:paddingTop="5dp"
-                    android:paddingBottom="5dp" />
+                    android:textColor="@color/durga_blue_accent"
+                    app:strokeColor="@color/durga_card_border"
+                    app:cornerRadius="18dp" />
             </LinearLayout>
 
-            <!-- Protection Status Card -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                app:cardCornerRadius="16dp"
-                app:cardBackgroundColor="@color/durga_card_bg"
-                app:strokeColor="@color/durga_card_border"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:padding="16dp"
-                    android:gravity="center_vertical">
-
-                    <View
-                        android:id="@+id/viewStatusDot"
-                        android:layout_width="14dp"
-                        android:layout_height="14dp"
-                        android:background="@color/durga_green_safe" />
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:layout_marginStart="14dp">
-
-                        <TextView
-                            android:id="@+id/tvStatusTitle"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/status_protected"
-                            android:textColor="@color/text_primary"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:letterSpacing="0.04" />
-
-                        <TextView
-                            android:id="@+id/tvStatusSubtitle"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Shake gesture &amp; SOS button standby"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- SOS Activation Hero Area -->
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="280dp"
-                android:layout_marginTop="24dp">
-
-                <!-- Outer Glow Ring -->
-                <View
-                    android:id="@+id/viewGlowRing"
-                    android:layout_width="220dp"
-                    android:layout_height="220dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_sos_button"
-                    android:alpha="0.25" />
-
-                <!-- Main SOS Button -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnSos"
-                    android:layout_width="180dp"
-                    android:layout_height="180dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_sos_button"
-                    app:backgroundTint="@null"
-                    android:text="SOS"
-                    android:textColor="@color/white"
-                    android:textSize="36sp"
-                    android:textStyle="bold"
-                    android:letterSpacing="0.05"
-                    app:cornerRadius="90dp"
-                    android:elevation="10dp" />
-
-                <!-- Countdown / Cancel Overlay (Hidden by default) -->
-                <LinearLayout
-                    android:id="@+id/layoutCountdown"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:background="#DD0B1120"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="EMERGENCY TRIGGERED"
-                        android:textColor="@color/durga_red_bright"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:letterSpacing="0.08" />
-
-                    <TextView
-                        android:id="@+id/tvCountdownNumber"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="5"
-                        android:textColor="@color/white"
-                        android:textSize="64sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Dispatching alerts in seconds..."
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
-                        android:layout_marginBottom="16dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnCancelEmergency"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/emergency_cancel"
-                        android:textColor="@color/white"
-                        app:backgroundTint="@color/durga_card_bg"
-                        app:strokeColor="@color/durga_card_border"
-                        app:strokeWidth="1dp" />
-                </LinearLayout>
-            </FrameLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:text="Tap SOS or shake device 3 times deliberately"
-                android:textColor="@color/text_muted"
-                android:textSize="12sp" />
-
-            <!-- System Telemetry Grid -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="SYSTEM TELEMETRY"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.08"
-                android:layout_marginTop="28dp"
-                android:layout_marginBottom="10dp" />
-
-            <!-- Row 1: Location & AI Audio -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="6dp"
-                    app:cardCornerRadius="12dp"
-                    app:cardBackgroundColor="@color/durga_card_bg"
-                    app:strokeColor="@color/durga_card_border"
-                    app:strokeWidth="1dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="12dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="GPS LOCATION"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tvTelemetryGps"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Standby"
-                            android:textColor="@color/durga_green_safe"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:layout_marginTop="4dp" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="6dp"
-                    app:cardCornerRadius="12dp"
-                    app:cardBackgroundColor="@color/durga_card_bg"
-                    app:strokeColor="@color/durga_card_border"
-                    app:strokeWidth="1dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="12dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="AI DISTRESS"
-                            android:textColor="@color/text_muted"
-                            android:textSize="10sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tvTelemetryAi"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Model Ready"
-                            android:textColor="@color/durga_blue_accent"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:layout_marginTop="4dp" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-            </LinearLayout>
-
-            <!-- Role Switcher Strip -->
+            <!-- Role Selector Tabs -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="24dp"
-                android:gravity="center">
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_status_badge"
+                android:padding="4dp">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnRoleUser"
+                    android:id="@+id/btnTabUser"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="38dp"
                     android:layout_weight="1"
                     android:text="USER"
                     android:textSize="11sp"
-                    android:layout_marginEnd="4dp" />
+                    android:textStyle="bold"
+                    app:cornerRadius="16dp" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnRoleContact"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/btnTabContact"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="38dp"
                     android:layout_weight="1"
                     android:text="CONTACT"
                     android:textSize="11sp"
-                    android:layout_marginEnd="4dp" />
+                    android:textColor="@color/text_secondary"
+                    app:cornerRadius="16dp" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnRoleResponder"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/btnTabResponder"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="38dp"
                     android:layout_weight="1"
                     android:text="POLICE"
-                    android:textSize="11sp" />
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    app:cornerRadius="16dp" />
+            </LinearLayout>
+
+            <!-- ======================================================== -->
+            <!-- ROLE 1: USER / VICTIM DASHBOARD CONTAINER               -->
+            <!-- ======================================================== -->
+            <LinearLayout
+                android:id="@+id/layoutUserDashboard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="visible">
+
+                <!-- Protection Status Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/durga_card_bg"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="16dp"
+                        android:gravity="center_vertical">
+
+                        <View
+                            android:id="@+id/viewStatusDot"
+                            android:layout_width="14dp"
+                            android:layout_height="14dp"
+                            android:background="@color/durga_green_safe" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginStart="14dp">
+
+                            <TextView
+                                android:id="@+id/tvStatusTitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/status_protected"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold"
+                                android:letterSpacing="0.04" />
+
+                            <TextView
+                                android:id="@+id/tvStatusSubtitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Shake gesture &amp; SOS button standby"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- SOS Activation Hero Area -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="270dp"
+                    android:layout_marginTop="20dp">
+
+                    <!-- Outer Glow Ring -->
+                    <View
+                        android:id="@+id/viewGlowRing"
+                        android:layout_width="220dp"
+                        android:layout_height="220dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/bg_sos_button"
+                        android:alpha="0.25" />
+
+                    <!-- Main SOS Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSos"
+                        android:layout_width="180dp"
+                        android:layout_height="180dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/bg_sos_button"
+                        app:backgroundTint="@null"
+                        android:text="SOS"
+                        android:textColor="@color/white"
+                        android:textSize="36sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.05"
+                        app:cornerRadius="90dp"
+                        android:elevation="10dp" />
+
+                    <!-- 5-Second Cancellation Window Overlay -->
+                    <LinearLayout
+                        android:id="@+id/layoutCountdown"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="#DD0B1120"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvCountdownTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="EMERGENCY TRIGGERED"
+                            android:textColor="@color/durga_red_bright"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.08" />
+
+                        <TextView
+                            android:id="@+id/tvCountdownNumber"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="5"
+                            android:textColor="@color/white"
+                            android:textSize="64sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvCountdownSub"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Dispatching alerts in seconds..."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:layout_marginBottom="16dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCancelEmergency"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/emergency_cancel"
+                            android:textColor="@color/white"
+                            app:backgroundTint="@color/durga_card_bg"
+                            app:strokeColor="@color/durga_card_border"
+                            app:strokeWidth="1dp" />
+                    </LinearLayout>
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Tap SOS or shake device 3 times deliberately"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+
+                <!-- Telemetry Cards -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SYSTEM TELEMETRY"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginBottom="10dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        app:cardCornerRadius="12dp"
+                        app:cardBackgroundColor="@color/durga_card_bg"
+                        app:strokeColor="@color/durga_card_border"
+                        app:strokeWidth="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="GPS LOCATION"
+                                android:textColor="@color/text_muted"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvTelemetryGps"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Standby"
+                                android:textColor="@color/durga_green_safe"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        app:cardCornerRadius="12dp"
+                        app:cardBackgroundColor="@color/durga_card_bg"
+                        app:strokeColor="@color/durga_card_border"
+                        app:strokeWidth="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="AI DISTRESS"
+                                android:textColor="@color/text_muted"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvTelemetryAi"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Model Ready"
+                                android:textColor="@color/durga_blue_accent"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- Emergency Contact Configuration Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardEmergencyContactUser"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    app:cardCornerRadius="14dp"
+                    app:cardBackgroundColor="@color/durga_card_bg"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="14dp"
+                        android:gravity="center_vertical">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="PRIMARY EMERGENCY CONTACT"
+                                android:textColor="@color/text_muted"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvUserContactName"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Trusted Contact (+91-9876543210)"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnEditContact"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:text="EDIT"
+                            android:textColor="@color/durga_blue_accent"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+
+            <!-- ======================================================== -->
+            <!-- ROLE 2: EMERGENCY CONTACT DASHBOARD CONTAINER           -->
+            <!-- ======================================================== -->
+            <LinearLayout
+                android:id="@+id/layoutContactDashboard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Header Notice -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    app:cardCornerRadius="14dp"
+                    app:cardBackgroundColor="@color/durga_surface_dark"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="EMERGENCY CONTACT MONITOR"
+                            android:textColor="@color/durga_blue_accent"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.06" />
+
+                        <TextView
+                            android:id="@+id/tvContactMonitoringStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Active Guardian: Receiving real-time distress alerts."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:layout_marginTop="3dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Active Alert Container for Contact -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardContactAlert"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/durga_card_bg"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:id="@+id/tvContactAlertBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="STANDBY"
+                                android:textColor="@color/white"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:background="@drawable/bg_badge_safe"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:paddingTop="3dp"
+                                android:paddingBottom="3dp" />
+
+                            <TextView
+                                android:id="@+id/tvContactIncidentId"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="No active distress"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                android:gravity="end" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvContactVictimName"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Citizen A: Protected &amp; Safe"
+                            android:textColor="@color/text_primary"
+                            android:textSize="17sp"
+                            android:textStyle="bold"
+                            android:layout_marginTop="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvContactDetails"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="When an emergency is triggered, live GPS coordinates, AI distress score, and nearest police station route will appear here."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:layout_marginTop="6dp" />
+
+                        <!-- Action Buttons for Contact -->
+                        <LinearLayout
+                            android:id="@+id/layoutContactActions"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginTop="16dp"
+                            android:visibility="gone">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnContactPlayAudio"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="PLAY AUDIO"
+                                android:textSize="11sp"
+                                android:layout_marginEnd="4dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnContactOpenMap"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="MAP ROUTE"
+                                android:textSize="11sp"
+                                android:layout_marginEnd="4dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnContactCallVictim"
+                                style="@style/Widget.Material3.Button"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1.2"
+                                android:text="CALL USER"
+                                android:textSize="11sp"
+                                app:backgroundTint="@color/durga_red_primary" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+
+            <!-- ======================================================== -->
+            <!-- ROLE 3: POLICE / RESPONDER DASHBOARD CONTAINER          -->
+            <!-- ======================================================== -->
+            <LinearLayout
+                android:id="@+id/layoutResponderDashboard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Command Center Header Banner -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    app:cardCornerRadius="14dp"
+                    app:cardBackgroundColor="@color/durga_surface_dark"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="INCIDENT COMMAND CONSOLE"
+                            android:textColor="@color/durga_red_bright"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.06" />
+
+                        <TextView
+                            android:id="@+id/tvResponderStationName"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Connected Station: Central Command / Nearest Unit"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:layout_marginTop="3dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Active Emergency Incident Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardResponderIncident"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/durga_card_bg"
+                    app:strokeColor="@color/durga_card_border"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
+
+                        <!-- Incident Status Header -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:id="@+id/tvResponderStatusBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="STANDBY"
+                                android:textColor="@color/white"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:background="@drawable/bg_badge_safe"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:paddingTop="3dp"
+                                android:paddingBottom="3dp" />
+
+                            <TextView
+                                android:id="@+id/tvResponderIncidentId"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="All sectors clear"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                android:gravity="end" />
+                        </LinearLayout>
+
+                        <!-- Citizen & Distress Info -->
+                        <TextView
+                            android:id="@+id/tvResponderVictimTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="No Active Incidents"
+                            android:textColor="@color/text_primary"
+                            android:textSize="17sp"
+                            android:textStyle="bold"
+                            android:layout_marginTop="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvResponderDetails"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Waiting for real-time dispatch alerts from citizens in distress."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:layout_marginTop="6dp" />
+
+                        <!-- Telemetry Grid for Responder -->
+                        <LinearLayout
+                            android:id="@+id/layoutResponderTelemetry"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:layout_marginTop="12dp"
+                            android:visibility="gone">
+
+                            <TextView
+                                android:id="@+id/tvResponderGps"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Location: 37.4220, -122.0840"
+                                android:textColor="@color/text_primary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvResponderAi"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="AI Distress: HIGH (0.85) - Vocalization"
+                                android:textColor="@color/durga_red_bright"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                android:layout_marginTop="2dp" />
+
+                            <TextView
+                                android:id="@+id/tvResponderStation"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Station: Viman Nagar Station (2.5 km)"
+                                android:textColor="@color/durga_blue_accent"
+                                android:textSize="12sp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <!-- Responder Action Control Rows -->
+                        <LinearLayout
+                            android:id="@+id/layoutResponderActions"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:layout_marginTop="16dp"
+                            android:visibility="gone">
+
+                            <!-- Row 1: Audio & Map Exploration -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnResponderPlayAudio"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="PLAY AUDIO"
+                                    android:textSize="11sp"
+                                    android:layout_marginEnd="6dp" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnResponderMap"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="GPS ROUTE"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <!-- Row 2: Status Escalation Controls -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:layout_marginTop="8dp">
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnResponderAcknowledge"
+                                    style="@style/Widget.Material3.Button.OutlinedButton"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="ACK"
+                                    android:textSize="11sp"
+                                    android:textColor="@color/durga_amber_warning"
+                                    app:strokeColor="@color/durga_amber_warning"
+                                    android:layout_marginEnd="4dp" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnResponderRespond"
+                                    style="@style/Widget.Material3.Button"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1.3"
+                                    android:text="DISPATCH"
+                                    android:textSize="11sp"
+                                    app:backgroundTint="@color/durga_red_primary"
+                                    android:layout_marginEnd="4dp" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnResponderResolve"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="RESOLVE"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
             </LinearLayout>
 
         </LinearLayout>

@@ -9,15 +9,22 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.durga.emergency.ai.DistressAnalyzer
 import com.durga.emergency.ai.DurgaScoringDistressAnalyzer
+import com.durga.emergency.audio.AudioRecorder
+import com.durga.emergency.audio.DurgaPcmAudioRecorder
+import com.durga.emergency.data.EmergencyRepository
+import com.durga.emergency.data.FirestoreEmergencyRepository
 import com.durga.emergency.data.LocalPoliceStationRepository
 import com.durga.emergency.data.PoliceStationRepository
+import com.durga.emergency.data.PreferencesManager
 import com.durga.emergency.data.model.EmergencyEvent
 import com.durga.emergency.emergency.EmergencyState
 import com.durga.emergency.emergency.UserRole
 import com.durga.emergency.location.DurgaLocation
 import com.durga.emergency.location.FusedLocationProvider
 import com.durga.emergency.location.LocationProvider
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -27,11 +34,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val CANCEL_WINDOW_SECONDS = 5
     }
 
+    private val prefs = PreferencesManager(application)
+    private val firestoreRepo: FirestoreEmergencyRepository = FirestoreEmergencyRepository.getInstance(application)
+    private val emergencyRepo: EmergencyRepository = firestoreRepo
     private val policeRepo: PoliceStationRepository = LocalPoliceStationRepository(application)
     private val locationProvider: LocationProvider = FusedLocationProvider(application)
+    private val audioRecorder: AudioRecorder = DurgaPcmAudioRecorder(application)
     private val distressAnalyzer: DistressAnalyzer = DurgaScoringDistressAnalyzer()
 
-    private val _currentRole = MutableLiveData(UserRole.USER)
+    private val _currentRole = MutableLiveData(prefs.selectedRole)
     val currentRole: LiveData<UserRole> = _currentRole
 
     private val _emergencyState = MutableLiveData(EmergencyState.IDLE)
@@ -40,20 +51,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _countdownSeconds = MutableLiveData(CANCEL_WINDOW_SECONDS)
     val countdownSeconds: LiveData<Int> = _countdownSeconds
 
+    private val _recordingSecondsRemaining = MutableLiveData(5)
+    val recordingSecondsRemaining: LiveData<Int> = _recordingSecondsRemaining
+
     private val _activeEmergencyEvent = MutableLiveData<EmergencyEvent?>()
     val activeEmergencyEvent: LiveData<EmergencyEvent?> = _activeEmergencyEvent
 
-    private val _locationInfo = MutableLiveData<String>("Standby")
+    private val _allEmergencyEvents = MutableLiveData<List<EmergencyEvent>>(emptyList())
+    val allEmergencyEvents: LiveData<List<EmergencyEvent>> = _allEmergencyEvents
+
+    private val _locationInfo = MutableLiveData("Standby")
     val locationInfo: LiveData<String> = _locationInfo
 
-    private val _aiDistressInfo = MutableLiveData<String>("Model Standby")
+    private val _aiDistressInfo = MutableLiveData("Model Standby")
     val aiDistressInfo: LiveData<String> = _aiDistressInfo
+
+    private val _userName = MutableLiveData(prefs.userName)
+    val userName: LiveData<String> = _userName
+
+    private val _contactName = MutableLiveData(prefs.contactName)
+    val contactName: LiveData<String> = _contactName
+
+    private val _contactPhone = MutableLiveData(prefs.contactPhone)
+    val contactPhone: LiveData<String> = _contactPhone
+
+    val isFirstLaunch: Boolean
+        get() = prefs.isFirstLaunch
+
+    fun setFirstLaunchCompleted() {
+        prefs.isFirstLaunch = false
+    }
 
     private var countdownTimer: CountDownTimer? = null
 
+    init {
+        // Observe real-time repository events (Firestore + local fallback)
+        viewModelScope.launch {
+            emergencyRepo.activeEvents.collectLatest { events ->
+                _allEmergencyEvents.value = events
+                val latest = events.firstOrNull()
+                _activeEmergencyEvent.value = latest
+            }
+        }
+    }
+
     fun setRole(role: UserRole) {
+        prefs.selectedRole = role
         _currentRole.value = role
-        Log.d(TAG, "[DURGA] Active role changed to: $role")
+        Log.d(TAG, "[DURGA] Active role set to: $role")
+    }
+
+    fun saveContactInfo(user: String, contact: String, phone: String) {
+        prefs.userName = user
+        prefs.contactName = contact
+        prefs.contactPhone = phone
+        _userName.value = user
+        _contactName.value = contact
+        _contactPhone.value = phone
+        Log.d(TAG, "[DURGA] Saved contact info: User=$user, Contact=$contact, Phone=$phone")
     }
 
     /**
@@ -102,9 +157,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun executeEmergencyPipeline() {
-        _emergencyState.value = EmergencyState.LOCATION_ACQUIRING
         viewModelScope.launch {
-            // Step 1: Acquire Location
+            // ========================================================
+            // STEP 1: MICROPHONE RECORDING (Phase 7: Microphone)
+            // ========================================================
+            _emergencyState.value = EmergencyState.RECORDING
+            Log.d(TAG, "[DURGA] Phase 7: Microphone activated. Capturing 5-second distress sample...")
+            val audioFile: File? = audioRecorder.recordAudio(durationMillis = 5000L) { remaining ->
+                _recordingSecondsRemaining.value = remaining
+            }
+
+            // ========================================================
+            // STEP 2: AI AUDIO DISTRESS ANALYSIS (Phase 8: AI Analysis)
+            // ========================================================
+            _emergencyState.value = EmergencyState.ANALYZING
+            Log.d(TAG, "[DURGA] Phase 8: Analyzing acoustic features (RMS, Peak, ZCR, Vocal energy)...")
+            val distressResult = distressAnalyzer.analyzeAudioFile(audioFile ?: File(""))
+            _aiDistressInfo.value = "${distressResult.level} (${String.format("%.2f", distressResult.score)})"
+            Log.d(TAG, "[DURGA] Distress assessment complete: ${distressResult.classification}")
+
+            // ========================================================
+            // STEP 3: GPS LOCATION ACQUISITION (Phase 9: Location)
+            // ========================================================
+            _emergencyState.value = EmergencyState.LOCATION_ACQUIRING
             val location: DurgaLocation? = locationProvider.getCurrentLocation()
             val lat = location?.latitude ?: 18.5204
             val lon = location?.longitude ?: 73.8567
@@ -115,22 +190,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             Log.d(TAG, "[DURGA] Location acquired: lat=$lat, lon=$lon")
 
-            // Step 2: Nearest Police Station calculation
+            // ========================================================
+            // STEP 4: NEAREST POLICE STATION LOOKUP (Phase 10: Police)
+            // ========================================================
             val (nearestStation, distanceKm) = policeRepo.findNearestStation(lat, lon)
             Log.d(TAG, "[DURGA] Nearest station: ${nearestStation?.name} at ${String.format("%.2f", distanceKm ?: 0.0)} km")
 
-            // Step 3: Audio & AI Assessment
-            _emergencyState.value = EmergencyState.ANALYZING
-            val distressResult = distressAnalyzer.analyzeAudioFile(java.io.File(""))
-            _aiDistressInfo.value = "${distressResult.level} (${String.format("%.2f", distressResult.score)})"
-            Log.d(TAG, "[DURGA] AI distress assessed: score=${distressResult.score}, level=${distressResult.level}")
-
-            // Step 4: Construct Emergency Event
+            // ========================================================
+            // STEP 5: AUDIO UPLOAD TO CLOUD / STORAGE (Phase 12)
+            // ========================================================
             val eventId = "DURGA-2026-" + UUID.randomUUID().toString().substring(0, 6).uppercase()
+            val audioReference = if (audioFile != null) {
+                firestoreRepo.uploadAudioFile(audioFile, eventId)
+            } else ""
+
+            // ========================================================
+            // STEP 6: CONSTRUCT & PUBLISH EMERGENCY EVENT (Phase 3 & 11)
+            // ========================================================
             val emergencyEvent = EmergencyEvent(
                 eventId = eventId,
                 userId = "USER-001",
-                userName = "DURGA Prototype User",
+                userName = _userName.value ?: "Citizen A",
                 timestamp = System.currentTimeMillis(),
                 latitude = lat,
                 longitude = lon,
@@ -138,10 +218,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 distressScore = distressResult.score,
                 distressClassification = distressResult.classification,
                 emergencyLevel = distressResult.level,
+                audioUrl = audioReference,
+                emergencyContactPhone = _contactPhone.value ?: "+91-9876543210",
                 nearestPoliceStationName = nearestStation?.name ?: "Central Station",
                 nearestPoliceStationDistanceKm = distanceKm ?: 2.5,
                 status = "ACTIVE"
             )
+
+            // Publish to Firestore & local real-time stream
+            firestoreRepo.publishEmergencyEvent(emergencyEvent)
 
             _activeEmergencyEvent.value = emergencyEvent
             _emergencyState.value = EmergencyState.ACTIVE
@@ -149,9 +234,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Responder status management: ACKNOWLEDGED, RESPONDING, RESOLVED
+     */
+    fun updateIncidentStatus(eventId: String, newStatus: String) {
+        viewModelScope.launch {
+            emergencyRepo.updateEventStatus(eventId, newStatus)
+            Log.d(TAG, "[DURGA] Updated incident $eventId status to $newStatus")
+            if (newStatus == "RESOLVED") {
+                _emergencyState.value = EmergencyState.RESOLVED
+                kotlinx.coroutines.delay(1500)
+                _emergencyState.value = EmergencyState.IDLE
+            }
+        }
+    }
+
     fun resetToSafe() {
         _emergencyState.value = EmergencyState.IDLE
-        _activeEmergencyEvent.value = null
+        _activeEmergencyEvent.value?.let { event ->
+            viewModelScope.launch {
+                emergencyRepo.resolveEmergency(event.eventId)
+            }
+        }
         _locationInfo.value = "Standby"
         _aiDistressInfo.value = "Model Standby"
         Log.d(TAG, "[DURGA] Emergency resolved. System returned to IDLE.")
