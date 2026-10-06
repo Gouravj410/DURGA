@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">DURGA</string>
+    <string name="app_tagline">Dynamic Unified Response &amp; Geo-Alert System</string>
+    <string name="status_protected">PROTECTED — SENSORS ACTIVE</string>
+    <string name="status_emergency">EMERGENCY ACTIVE</string>
+    <string name="emergency_btn_text">HOLD SOS</string>
+    <string name="emergency_cancel">CANCEL EMERGENCY</string>
+</resources>

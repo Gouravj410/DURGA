@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand & Emergency System Palette -->
+    <color name="durga_dark_bg">#0B1120</color>
+    <color name="durga_surface_dark">#131D31</color>
+    <color name="durga_card_bg">#1E293B</color>
+    <color name="durga_card_border">#334155</color>
+    
+    <!-- Emergency Status Colors -->
+    <color name="durga_red_primary">#DC2626</color>
+    <color name="durga_red_bright">#EF4444</color>
+    <color name="durga_red_glow">#4C1D1D</color>
+    <color name="durga_green_safe">#10B981</color>
+    <color name="durga_amber_warning">#F59E0B</color>
+    <color name="durga_blue_accent">#38BDF8</color>
+    
+    <!-- Text Colors -->
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_muted">#64748B</color>
+    <color name="text_inverse">#0F172A</color>
+    
+    <!-- Base Material -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
