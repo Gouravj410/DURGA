@@ -56,4 +56,8 @@ class InMemoryEmergencyRepository private constructor() : EmergencyRepository {
     override fun getLatestEvent(): EmergencyEvent? {
         return _eventsFlow.value.firstOrNull()
     }
+
+    fun clear() {
+        _eventsFlow.value = emptyList()
+    }
 }

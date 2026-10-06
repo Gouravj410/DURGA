@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // User profiles & Device Registrations
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Emergency Events
+    // Citizens in distress create events; contacts and responders monitor & update status
+    match /emergencyEvents/{eventId} {
+      // Allow read for contacts, responders, and prototype clients
+      allow read: if true;
+
+      // Event creation validation: required fields
+      allow create: if request.resource.data.eventId != null
+                    && request.resource.data.status == 'ACTIVE'
+                    && request.resource.data.distressScore is number;
+
+      // Status updates: allow transition to ACKNOWLEDGED, RESPONDING, RESOLVED
+      allow update: if request.resource.data.status in ['ACTIVE', 'ACKNOWLEDGED', 'RESPONDING', 'RESOLVED', 'CANCELLED'];
+
+      // Prevent unauthorized deletion of emergency logs
+      allow delete: if false;
+    }
+  }
+}
