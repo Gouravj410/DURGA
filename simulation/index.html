@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DURGA — Dynamic Unified Response & Geo-Alert System | Showcase Simulation</title>
+  <meta name="description" content="Interactive Laptop Demonstration Simulator for the DURGA Android Emergency Response Platform. Showcases triple-role mesh, acoustic AI distress analysis, and nearest police dispatch.">
+  
+  <!-- Leaflet CSS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- 1. Top Command Bar -->
+  <header class="top-navbar">
+    <div class="brand-wrapper">
+      <div class="brand-shield">🛡️</div>
+      <div class="brand-title-group">
+        <h1>
+          <span class="acronym">DURGA</span>
+          <span class="subtitle">System Architecture Simulation</span>
+        </h1>
+        <div style="display: flex; gap: 8px; margin-top: 3px;">
+          <span class="tag-badge">Semester 5 Mini-Project</span>
+          <span class="tag-badge" style="border-color: rgba(6,182,212,0.4); color:#67E8F9; background:rgba(6,182,212,0.15);">Triple-Role Mesh</span>
+          <span class="tag-badge" style="border-color: rgba(139,92,246,0.4); color:#DDD6FE; background:rgba(139,92,246,0.15);">AI Acoustic Scoring</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Demo Run Controls -->
+    <div class="global-controls">
+      <button id="btnRunFullDemo" class="btn-ctrl btn-ctrl-primary" title="Automates full end-to-end incident lifecycle">
+        ⚡ Run Full Emergency Demo
+      </button>
+      <button id="btnRunFalseAlarm" class="btn-ctrl" title="Demonstrates cancellation within 5s verification window">
+        🛡️ False Alarm Demo
+      </button>
+      <button id="btnOpenLab" class="btn-ctrl btn-ctrl-cyan" title="Open Acoustic AI Lab Modal">
+        🔬 AI Acoustic Lab
+      </button>
+      <button id="btnResetSim" class="btn-ctrl" title="Reset all devices to IDLE">
+        🔄 Reset
+      </button>
+      <button id="btnToggleSound" class="btn-ctrl" style="padding: 8px 12px;" title="Toggle Mute/Unmute">
+        <span id="soundIcon">🔊</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 2. Master Pipeline Stepper (Sense -> Verify -> Record -> Assess -> Locate -> Cloud -> Alert -> Respond) -->
+  <section class="pipeline-stepper-bar">
+    <div class="stepper-header">
+      <span>Pipeline State:</span>
+    </div>
+    <div class="stepper-indicator">
+      <div id="step-sense" class="step-node">
+        <span class="step-num">01</span>
+        <span class="step-name">SENSE</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-verify" class="step-node">
+        <span class="step-num">02</span>
+        <span class="step-name">VERIFY</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-record" class="step-node">
+        <span class="step-num">03</span>
+        <span class="step-name">RECORD</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-assess" class="step-node">
+        <span class="step-num">04</span>
+        <span class="step-name">ASSESS</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-locate" class="step-node">
+        <span class="step-num">05</span>
+        <span class="step-name">LOCATE</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-cloud" class="step-node">
+        <span class="step-num">06</span>
+        <span class="step-name">CLOUD</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-alert" class="step-node">
+        <span class="step-num">07</span>
+        <span class="step-name">ALERT</span>
+      </div>
+      <span class="step-arrow">➔</span>
+      <div id="step-respond" class="step-node">
+        <span class="step-num">08</span>
+        <span class="step-name">RESPOND</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Main Dashboard: Three Synchronized Device Mockups -->
+  <main class="main-wrapper">
+    <section class="device-trio-grid">
+
+      <!-- DEVICE 1: USER / VICTIM DEVICE -->
+      <article id="userDeviceCard" class="device-card">
+        <div class="device-header-strip">
+          <div class="device-role-tag">
+            <span style="color: #FDA4AF;">📱 VICTIM SMARTPHONE</span>
+            <span class="tag-badge" style="font-size: 0.6rem;">USER ROLE</span>
+          </div>
+          <span id="userStatusPill" class="status-pill idle">IDLE</span>
+        </div>
+
+        <div class="phone-viewport">
+          <div class="phone-top-notch">
+            <div class="notch-camera"></div>
+          </div>
+          <div class="phone-status-bar">
+            <span>08:14</span>
+            <span>LTE • 92% 🔋</span>
+          </div>
+
+          <!-- 5-Second Verification Overlay -->
+          <div id="countdownOverlay" class="countdown-overlay">
+            <div class="countdown-ring-box">
+              <svg class="countdown-svg">
+                <circle class="countdown-bg-circle" cx="65" cy="65" r="54"></circle>
+                <circle id="countdownProgCircle" class="countdown-prog-circle" cx="65" cy="65" r="54"></circle>
+              </svg>
+              <div id="countdownNumber" class="countdown-number">5</div>
+            </div>
+            <div class="countdown-title">EMERGENCY TRIGGERED</div>
+            <div class="countdown-desc">Verifying incident. Dispatches in seconds if not cancelled.</div>
+            <button id="btnCancelCountdown" class="cancel-countdown-btn">
+              ✕ CANCEL / FALSE ALARM
+            </button>
+          </div>
+
+          <div class="phone-screen-content">
+            <div class="user-hero-card">
+              <div class="welcome-text">PROTECTION ACTIVE</div>
+              <div class="user-name">Ananya Sharma</div>
+            </div>
+
+            <!-- Accelerometer Shake Sensor Box -->
+            <div class="sensor-shake-box">
+              <div class="sensor-header">
+                <span>ACCELEROMETER G-FORCE (3-AXIS)</span>
+                <span id="accelGReadout" style="color: #67E8F9; font-weight: 700;">1.0G (Normal)</span>
+              </div>
+              <canvas id="accelCanvas" class="accel-canvas" width="280" height="52"></canvas>
+              <button id="btnTriggerShake" class="shake-trigger-btn">
+                👋 Shake Device (3x Rapid Gesture)
+              </button>
+            </div>
+
+            <!-- Primary SOS Button -->
+            <div class="sos-button-wrapper">
+              <div class="sos-ripple"></div>
+              <button id="btnSosBig" class="sos-big-btn">
+                <span class="sos-icon">🚨</span>
+                <span class="sos-label">SOS</span>
+                <span class="sos-subtext">TAP OR SHAKE</span>
+              </button>
+            </div>
+
+            <!-- Acoustic AI Audio Recorder HUD -->
+            <div class="audio-monitor-card">
+              <div class="audio-header">
+                <span class="audio-title">🎙️ 16-BIT PCM ACOUSTIC AI</span>
+                <span id="audioIndicatorText" style="font-size: 0.65rem; color: #94A3B8; font-family: monospace;">STANDBY</span>
+              </div>
+              <canvas id="waveformCanvas" class="waveform-canvas" width="280" height="55"></canvas>
+              <div class="ai-metrics-grid">
+                <div class="metric-pill">
+                  <span class="lbl">RMS POWER</span>
+                  <span id="aiDbfsVal" class="val">-96.0 dBFS</span>
+                </div>
+                <div class="metric-pill">
+                  <span class="lbl">PEAK TRANSIENT</span>
+                  <span id="aiPeakVal" class="val">0 / 32,767</span>
+                </div>
+                <div class="metric-pill">
+                  <span class="lbl">ZERO CROSSING (ZCR)</span>
+                  <span id="aiZcrVal" class="val">0.000</span>
+                </div>
+                <div class="metric-pill">
+                  <span class="lbl">AI CONFIDENCE</span>
+                  <span id="aiScoreVal" class="val">0.0%</span>
+                </div>
+              </div>
+              <div class="ai-classification-box">
+                <span id="aiClassificationText">Waiting for audio trigger...</span>
+              </div>
+            </div>
+
+            <!-- Victim Location Box -->
+            <div class="location-summary-card">
+              <div class="loc-line">
+                <span>GPS Coordinates:</span>
+                <span id="userGpsVal" class="val">18.5236, 73.8415</span>
+              </div>
+              <div class="loc-line">
+                <span>Nearest Station:</span>
+                <span id="userNearestStationVal" class="val">Central Police Station (1.42 km)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- DEVICE 2: EMERGENCY CONTACT DEVICE -->
+      <article id="contactDeviceCard" class="device-card">
+        <div class="device-header-strip">
+          <div class="device-role-tag">
+            <span style="color: #6EE7B7;">📲 TRUSTED CONTACT PHONE</span>
+            <span class="tag-badge" style="font-size: 0.6rem; border-color: rgba(16,185,129,0.4); color: #6EE7B7;">CONTACT ROLE</span>
+          </div>
+          <span id="contactStatusPill" class="status-pill idle">IDLE</span>
+        </div>
+
+        <div class="phone-viewport">
+          <div class="phone-top-notch">
+            <div class="notch-camera"></div>
+          </div>
+          <div class="phone-status-bar">
+            <span>08:14</span>
+            <span>5G • 88% 🔋</span>
+          </div>
+
+          <div class="phone-screen-content">
+            <div class="user-hero-card" style="border-color: rgba(16,185,129,0.2);">
+              <div class="welcome-text">EMERGENCY GUARDIAN</div>
+              <div class="user-name">Rahul Sharma (Brother)</div>
+            </div>
+
+            <!-- Incoming Emergency Alert Banner -->
+            <div id="contactAlertBanner" class="contact-alert-banner">
+              <div class="alert-top-title">
+                <div class="alert-heading">🚨 SOS ALERT RECEIVED</div>
+                <span class="tag-badge" style="background:#E11D48; color:white;">HIGH PRIORITY</span>
+              </div>
+
+              <div class="victim-profile-row">
+                <div class="victim-avatar">AS</div>
+                <div class="victim-meta">
+                  <h3>Ananya Sharma</h3>
+                  <p>+91 98765 43210 • Sibling</p>
+                </div>
+              </div>
+
+              <!-- AI Distress Result Box in Contact Screen -->
+              <div style="background: rgba(15,23,42,0.8); border: 1px solid rgba(225,29,72,0.3); border-radius: 8px; padding: 8px 10px; font-size: 0.72rem;">
+                <div style="color: #FDA4AF; font-weight: 700; margin-bottom: 2px;">AI FORENSIC ACOUSTIC ASSESSMENT</div>
+                <div style="color: #F8FAFC;">High Distress (Screaming Detected - 92% Confidence)</div>
+              </div>
+
+              <!-- Contact Screen Audio Player -->
+              <div class="contact-audio-player">
+                <div class="player-title">
+                  <span>AMBIENT EVIDENCE AUDIO (5s)</span>
+                  <span id="playerTimeDisplay">00:00 / 00:05</span>
+                </div>
+                <div class="player-controls-row">
+                  <button id="btnPlayAudio" class="play-pause-btn">▶</button>
+                  <div class="player-scrubber">
+                    <div id="playerProgressBar" class="player-progress"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="contact-action-btns">
+                <button class="btn-contact-action btn-contact-police" onclick="alert('Simulated Direct Call to Police Control Room (112)');">
+                  📞 Call 112
+                </button>
+                <button class="btn-contact-action btn-contact-nav" onclick="alert('Opening Google Maps Directions to Victim Coordinates');">
+                  🧭 Open Route
+                </button>
+              </div>
+            </div>
+
+            <!-- Standby message if no alert -->
+            <div id="contactStandbyBox" style="text-align: center; color: var(--text-dim); margin-top: 50px; font-size: 0.8rem; line-height: 1.6;">
+              <div style="font-size: 32px; margin-bottom: 10px;">🟢</div>
+              <div><b>GUARDIAN LINK ACTIVE</b></div>
+              <div style="font-size: 0.72rem; color: #64748B;">Listening for incoming emergency telemetry via Cloud & Push Notification mesh.</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- DEVICE 3: POLICE CAD RESPONDER TERMINAL -->
+      <article id="responderDeviceCard" class="device-card">
+        <div class="device-header-strip">
+          <div class="device-role-tag">
+            <span style="color: #93C5FD;">🚔 POLICE DISPATCH CAD TERMINAL</span>
+            <span class="tag-badge" style="font-size: 0.6rem; border-color: rgba(59,130,246,0.4); color: #93C5FD;">RESPONDER ROLE</span>
+          </div>
+          <span id="responderStatusPill" class="status-pill idle">IDLE</span>
+        </div>
+
+        <div class="police-terminal-wrapper">
+          <div class="police-top-banner">
+            <div class="cad-badge">
+              <span>● CAD LIVE MDT</span>
+            </div>
+            <div id="cadStationName" class="cad-station-name">Central Police Station</div>
+          </div>
+
+          <!-- CAD Incident Details Card -->
+          <div id="cadIncidentCard" class="cad-incident-card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; color: #93C5FD;">INCIDENT TELEMETRY</span>
+              <span class="tag-badge" style="background:#2563EB; color:white;">SECTOR-1 DISPATCH</span>
+            </div>
+
+            <div class="cad-detail-grid">
+              <div class="cad-cell">
+                <span class="lbl">INCIDENT ID</span>
+                <span id="cadIncidentId" class="val">INC-WAITING</span>
+              </div>
+              <div class="cad-cell">
+                <span class="lbl">TIMESTAMP</span>
+                <span id="cadTimestamp" class="val">--:--:--</span>
+              </div>
+              <div class="cad-cell">
+                <span class="lbl">HAVERSINE DIST</span>
+                <span id="cadDistance" class="val">0.00 km</span>
+              </div>
+              <div class="cad-cell">
+                <span class="lbl">ESTIMATED ETA</span>
+                <span id="cadEta" class="val">-- mins</span>
+              </div>
+            </div>
+
+            <div class="cad-cell" style="grid-column: span 2;">
+              <span class="lbl">ACOUSTIC AI ASSESSMENT</span>
+              <span id="cadDistressScore" class="val" style="color: #FDA4AF;">No active trigger</span>
+            </div>
+          </div>
+
+          <!-- Police Lifecycle Controls Trio (ACK -> DISPATCH -> RESOLVE) -->
+          <div class="police-actions-stack">
+            <button id="btnCadAck" class="btn-cad btn-cad-ack" disabled>
+              1️⃣ [ACKNOWLEDGE INCIDENT]
+            </button>
+            <button id="btnCadDispatch" class="btn-cad btn-cad-dispatch" disabled>
+              2️⃣ [DISPATCH PATROL UNIT]
+            </button>
+            <button id="btnCadResolve" class="btn-cad btn-cad-resolve" disabled>
+              3️⃣ [RESOLVE & ARCHIVE INCIDENT]
+            </button>
+          </div>
+
+          <div style="font-size: 0.68rem; color: #64748B; font-family: monospace; line-height: 1.4; padding: 4px;">
+            * Response times, dispatch vectoring, and telemetry audits conform to DURGA CAD protocols.
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- 4. Bottom Half: Geo-Spatial Radar Map & Real-time Telemetry Audit Log -->
+    <section class="bottom-analytics-grid">
+
+      <!-- Interactive Map Card -->
+      <div class="map-card-wrapper">
+        <div class="map-header-bar">
+          <div class="map-title">
+            <span>🗺️ TACTICAL GEO-SPATIAL MAP & DISPATCH VECTOR</span>
+          </div>
+          <div class="map-preset-selector">
+            <span style="font-size: 0.72rem; color: var(--text-muted);">Simulate Location:</span>
+            <select id="locationPresetSelect">
+              <option value="shivajinagar">FC Road, Shivajinagar</option>
+              <option value="hinjawadi">Quadron IT Park, Hinjawadi</option>
+              <option value="kothrud">MIT Campus, Kothrud</option>
+              <option value="camp">MG Road, Cantonment</option>
+              <option value="vimannagar">Phoenix Mall, Viman Nagar</option>
+            </select>
+          </div>
+        </div>
+        <div id="leafletMapContainer"></div>
+      </div>
+
+      <!-- Real-Time Audit Log Card -->
+      <div class="audit-log-card">
+        <div class="audit-header">
+          <div class="audit-title">
+            <span>📋 AUDIT TRAIL & SYSTEM TELEMETRY</span>
+          </div>
+          <span class="tag-badge" style="color: #67E8F9; border-color: rgba(6,182,212,0.4);">LIVE</span>
+        </div>
+        <div id="auditFeedScroll" class="audit-feed-scroll">
+          <!-- Dynamic entries will be prepended here -->
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- 5. Acoustic AI Laboratory Modal -->
+  <div id="aiLabModal" class="modal-backdrop">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>🔬 DURGA Forensic Acoustic AI Testing Lab</h2>
+        <button id="btnCloseLab" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5;">
+          This forensic laboratory lets evaluators and professors test the physical acoustic formulas (RMS Energy, Peak Amplitude, dBFS, and Zero-Crossing Rate) against synthesized audio classes in real-time.
+        </p>
+
+        <div class="sound-test-grid">
+          <div class="sound-test-card" onclick="testSoundScenario('scream')">
+            <h4>🔴 High Distress / Scream</h4>
+            <p>1100 Hz high vocal peak with breath noise. > -22 dBFS, high ZCR.</p>
+          </div>
+          <div class="sound-test-card" onclick="testSoundScenario('shout')">
+            <h4>🟡 Elevated Voice / Shouting</h4>
+            <p>450 Hz struggle / vocal stress. -34 to -22 dBFS range.</p>
+          </div>
+          <div class="sound-test-card" onclick="testSoundScenario('ambient')">
+            <h4>🟢 Ambient Street Chatter</h4>
+            <p>Normal environment audio. Low acoustic energy &lt; -34 dBFS.</p>
+          </div>
+          <div class="sound-test-card" onclick="testSoundScenario('silence')">
+            <h4>⚪ Silence / Whisper</h4>
+            <p>Quiet baseline noise floor &lt; -60 dBFS.</p>
+          </div>
+        </div>
+
+        <div id="labTestResult"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS for Map -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Application JS -->
+  <script src="app.js"></script>
+</body>
+</html>

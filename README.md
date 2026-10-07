@@ -146,3 +146,26 @@ Output: `app/build/outputs/apk/debug/app-debug.apk` (11.0 MB)
 - **Firestore Rules** (`firestore.rules`): Validates schema, protects log deletion, enforces role permissions.
 - **Storage Rules** (`storage.rules`): Restricts uploads to audio MIME types under 5 MB.
 - **Privacy by Design**: Microphone is **never** recorded continuously in the background. It is activated exclusively after the 5-second verification window expires during an explicit emergency.
+
+---
+
+## 8. Interactive Laptop Showcase & System Simulation
+
+For project evaluations, classroom defense, and viva demonstrations where physical phone projection might be inconvenient, a comprehensive **Laptop Demonstration Simulator** is included in the `simulation/` directory.
+
+### Quick Start (Single Click / Terminal):
+```powershell
+.\run_simulation.ps1
+```
+*Or double-click `simulation/index.html` in any modern web browser.*
+
+### Showcase Features:
+- **Triple-Role Mesh**: Side-by-side interactive mockups of **Victim Smartphone (`USER`)**, **Trusted Contact Phone (`EMERGENCY_CONTACT`)**, and **Police Dispatch Terminal (`POLICE_RESPONDER`)**.
+- **Interactive Triggers**: 3-axis accelerometer shake canvas (>2.7G spike simulation) and pulsating SOS button.
+- **Verification Window**: 5-second SVG countdown with cancel/false-alarm button.
+- **Acoustic AI Engine**: Real-time 16-bit PCM waveform oscilloscope computing RMS, dBFS, and Zero-Crossing Rate.
+- **Audio Evidence Player**: Working in-browser player on the contact device to listen to ambient audio recordings.
+- **Tactical Map (Leaflet.js)**: Displays victim coordinates, all 5 Pune police stations, nearest station calculation via Haversine, and animated police cruiser movement along the vector route.
+- **Police CAD Controls**: Full interactive lifecycle buttons (`[ACKNOWLEDGE]`, `[DISPATCH PATROL]`, `[RESOLVE & ARCHIVE]`).
+- **Forensic AI Acoustic Lab**: Interactive modal to test and benchmark scream detection, elevated shouting, and ambient noise against mathematical formulas.
+
