@@ -84,6 +84,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var countdownTimer: CountDownTimer? = null
 
+    private val _nearbyMeshAlertEvent = MutableLiveData<EmergencyEvent?>()
+    val nearbyMeshAlertEvent: LiveData<EmergencyEvent?> = _nearbyMeshAlertEvent
+
     init {
         // Observe real-time repository events (Firestore + local fallback)
         viewModelScope.launch {
@@ -91,8 +94,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _allEmergencyEvents.value = events
                 val latest = events.firstOrNull()
                 _activeEmergencyEvent.value = latest
+
+                // If an incoming event is active from another citizen in the mesh, alert the user
+                if (latest != null && latest.status == "ACTIVE" && latest.userId != "USER-001") {
+                    _nearbyMeshAlertEvent.value = latest
+                }
             }
         }
+    }
+
+    /**
+     * Simulates an incoming proximity mesh emergency from another citizen nearby.
+     */
+    fun simulateNearbyMeshAlert() {
+        val currentLat = _activeEmergencyEvent.value?.latitude ?: 18.5204
+        val currentLon = _activeEmergencyEvent.value?.longitude ?: 73.8567
+        val nearbyEvent = EmergencyEvent(
+            eventId = "MESH-" + UUID.randomUUID().toString().substring(0, 6).uppercase(),
+            userId = "CITIZEN-NEARBY-77",
+            userName = "Priya Deshmukh (Nearby Citizen)",
+            timestamp = System.currentTimeMillis(),
+            latitude = currentLat + 0.0031, // ~350 meters away
+            longitude = currentLon + 0.0022,
+            locationAccuracy = 10.0f,
+            distressScore = 0.91f,
+            distressClassification = "High Distress (High-Intensity Screaming detected)",
+            emergencyLevel = "CRITICAL",
+            audioUrl = _activeEmergencyEvent.value?.audioUrl ?: "",
+            emergencyContactPhone = "+91-9876543210",
+            nearestPoliceStationName = "Central Police Station",
+            nearestPoliceStationDistanceKm = 1.15,
+            status = "ACTIVE"
+        )
+        _nearbyMeshAlertEvent.value = nearbyEvent
+        viewModelScope.launch {
+            emergencyRepo.publishEmergencyEvent(nearbyEvent)
+        }
+        Log.d(TAG, "[DURGA MESH] Simulated incoming nearby citizen emergency: ${nearbyEvent.eventId}")
+    }
+
+    fun dismissNearbyMeshAlert() {
+        _nearbyMeshAlertEvent.value = null
     }
 
     fun setRole(role: UserRole) {

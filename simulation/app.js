@@ -374,71 +374,92 @@ function setEmergencyState(newState) {
 
   switch (newState) {
     case EmergencyState.IDLE:
-      userDeviceCard.classList.remove("emergency-active");
-      countdownOverlay.classList.remove("show");
-      contactAlertBanner.classList.remove("show");
-      cadIncidentCard.classList.remove("active-alert");
+      userDeviceCard?.classList.remove("emergency-active");
+      countdownOverlay?.classList.remove("show");
+      contactAlertBanner?.classList.remove("show");
+      cadIncidentCard?.classList.remove("active-alert");
       resetPoliceCadButtons();
-      logAuditEvent("System initialized in IDLE monitoring mode.", "normal");
+      dismissNearbyMeshCitizenAlert();
+      if (userStatusPill) { userStatusPill.textContent = "IDLE"; userStatusPill.className = "status-pill idle"; }
+      if (contactStatusPill) { contactStatusPill.textContent = "IDLE"; contactStatusPill.className = "status-pill idle"; }
+      if (responderStatusPill) { responderStatusPill.textContent = "IDLE"; responderStatusPill.className = "status-pill idle"; }
+      logAuditEvent("System initialized in IDLE monitoring mode across all 4 mesh nodes.", "normal");
       break;
 
     case EmergencyState.TRIGGERED:
     case EmergencyState.VERIFYING:
-      userDeviceCard.classList.add("emergency-active");
-      countdownOverlay.classList.add("show");
+      userDeviceCard?.classList.add("emergency-active");
+      countdownOverlay?.classList.add("show");
+      if (userStatusPill) { userStatusPill.textContent = "VERIFYING (5s)"; userStatusPill.className = "status-pill warning"; }
       startCountdownTimer();
-      logAuditEvent("Gesture/SOS trigger activated. 5-second countdown verification initiated.", "warning");
+      logAuditEvent("Gesture/SOS trigger activated on Victim device. 5-second countdown verification initiated.", "warning");
       break;
 
     case EmergencyState.CANCELLED:
-      countdownOverlay.classList.remove("show");
-      userDeviceCard.classList.remove("emergency-active");
+      countdownOverlay?.classList.remove("show");
+      userDeviceCard?.classList.remove("emergency-active");
+      if (userStatusPill) { userStatusPill.textContent = "CANCELLED"; userStatusPill.className = "status-pill idle"; }
       logAuditEvent("False alarm cancelled by user within verification window. Incident aborted.", "success");
       setTimeout(() => setEmergencyState(EmergencyState.IDLE), 1500);
       break;
 
     case EmergencyState.RECORDING:
-      countdownOverlay.classList.remove("show");
+      countdownOverlay?.classList.remove("show");
+      if (userStatusPill) { userStatusPill.textContent = "RECORDING (5s)"; userStatusPill.className = "status-pill warning"; }
       logAuditEvent("Verification window expired. Low-level 16-bit PCM Audio capture started (5 sec).", "warning");
       startAudioCapturePhase();
       break;
 
     case EmergencyState.ANALYZING:
+      if (userStatusPill) { userStatusPill.textContent = "ANALYZING AI"; userStatusPill.className = "status-pill warning"; }
       logAuditEvent("Audio recording finished. AI Acoustic Scoring Engine computing RMS, dBFS, and ZCR.", "warning");
       analyzeCapturedAudio();
       break;
 
     case EmergencyState.LOCATION_ACQUIRING:
+      if (userStatusPill) { userStatusPill.textContent = "LOCATING GPS"; userStatusPill.className = "status-pill warning"; }
       logAuditEvent("GPS coordinates locked. Computing nearest police station via Haversine formula.", "normal");
       acquireLocationAndComputeStation();
       break;
 
     case EmergencyState.ESCALATING:
-      logAuditEvent("Packaging Incident Telemetry payload for Cloud & Mesh escalation.", "warning");
+      if (userStatusPill) { userStatusPill.textContent = "BROADCASTING"; userStatusPill.className = "status-pill warning"; }
+      logAuditEvent("Packaging Incident Telemetry payload for Cloud & Community Mesh escalation.", "warning");
       setTimeout(() => setEmergencyState(EmergencyState.ACTIVE), 600);
       break;
 
     case EmergencyState.ACTIVE:
-      contactAlertBanner.classList.add("show");
-      cadIncidentCard.classList.add("active-alert");
+      if (userStatusPill) { userStatusPill.textContent = "SOS ACTIVE"; userStatusPill.className = "status-pill emergency"; }
+      if (contactStatusPill) { contactStatusPill.textContent = "EMERGENCY"; contactStatusPill.className = "status-pill emergency"; }
+      if (responderStatusPill) { responderStatusPill.textContent = "CAD ALERT"; responderStatusPill.className = "status-pill emergency"; }
+
+      contactAlertBanner?.classList.add("show");
+      cadIncidentCard?.classList.add("active-alert");
       playAlarmSiren();
       enablePoliceCadAcknowledge();
       updateCadIncidentDetails();
-      logAuditEvent(`CRITICAL ALERT ACTIVE! Incident dispatched to ${appState.nearestStation ? appState.nearestStation.name : 'Central Dispatch'}.`, "critical");
+      triggerNearbyMeshCitizenAlert();
+
+      logAuditEvent(`🚨 CRITICAL EMERGENCY ACTIVE! Broadcasted across 4-Node Ecosystem: Victim (Ananya) ➔ Nearby Citizen (Priya) ➔ Guardian (Rahul) ➔ Police CAD (${appState.nearestStation ? appState.nearestStation.name : 'Central Dispatch'}).`, "critical");
       break;
 
     case EmergencyState.ACKNOWLEDGED:
+      if (responderStatusPill) { responderStatusPill.textContent = "ACKNOWLEDGED"; responderStatusPill.className = "status-pill warning"; }
       logAuditEvent("Police Dispatcher ACKNOWLEDGED the incoming emergency.", "warning");
       enablePoliceCadDispatch();
       break;
 
     case EmergencyState.RESPONDING:
+      if (responderStatusPill) { responderStatusPill.textContent = "PATROL EN ROUTE"; responderStatusPill.className = "status-pill emergency"; }
       logAuditEvent("Patrol Unit DISPATCHED! Cruiser en route with sirens enabled.", "critical");
       enablePoliceCadResolve();
       startPatrolMovementSimulation();
       break;
 
     case EmergencyState.RESOLVED:
+      if (userStatusPill) { userStatusPill.textContent = "RESOLVED"; userStatusPill.className = "status-pill idle"; }
+      if (contactStatusPill) { contactStatusPill.textContent = "RESOLVED"; contactStatusPill.className = "status-pill idle"; }
+      if (responderStatusPill) { responderStatusPill.textContent = "CASE ARCHIVED"; responderStatusPill.className = "status-pill idle"; }
       logAuditEvent("Incident successfully RESOLVED by responding units. Report archived.", "success");
       stopPatrolMovement();
       setTimeout(() => {
@@ -803,6 +824,8 @@ function simulatePhoneShake() {
 // --- 14. Leaflet Map & Radar Fallback Engine ---
 let leafletMap = null;
 let victimMarker = null;
+let nearbyCitizenMarker = null;
+let meshPolyline = null;
 let stationMarkers = [];
 let dispatchPolyline = null;
 
@@ -816,8 +839,8 @@ function initMap() {
   if (window.L) {
     try {
       leafletMap = L.map('leafletMapContainer').setView([centerLat, centerLng], 13);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(leafletMap);
 
@@ -842,6 +865,15 @@ function initMap() {
       victimMarker = L.marker([centerLat, centerLng], { icon: victimIcon }).addTo(leafletMap);
       victimMarker.bindPopup(`<b>VICTIM LOCATION</b><br>${appState.victimLocation.name}`);
 
+      // Add nearby citizen marker (~350m away)
+      const nearbyIcon = L.divIcon({
+        className: 'custom-nearby-icon',
+        html: `<div style="background:#0F172A; width:30px; height:30px; border-radius:50%; border:2px solid #FDA4AF; display:flex; align-items:center; justify-content:center; box-shadow:0 0 14px rgba(225,29,72,0.6); color:white; font-size:14px;">📡</div>`,
+        iconSize: [30, 30]
+      });
+      nearbyCitizenMarker = L.marker([centerLat + 0.0022, centerLng + 0.0018], { icon: nearbyIcon }).addTo(leafletMap);
+      nearbyCitizenMarker.bindPopup(`<b>NEARBY CITIZEN: Priya Deshmukh</b><br>DURGA Community Mesh Node<br>~350m from Victim`);
+
     } catch (e) {
       console.warn("Leaflet initialization failed, fallback active:", e);
       renderSvgRadarFallback(mapElem);
@@ -859,6 +891,11 @@ function updateMapLocations() {
   if (victimMarker) {
     victimMarker.setLatLng([vLat, vLng]);
     victimMarker.setPopupContent(`<b>VICTIM: Ananya Sharma</b><br>${appState.victimLocation.name}<br>Lat: ${vLat.toFixed(4)}, Lon: ${vLng.toFixed(4)}`);
+  }
+
+  if (nearbyCitizenMarker) {
+    nearbyCitizenMarker.setLatLng([vLat + 0.0022, vLng + 0.0018]);
+    nearbyCitizenMarker.setPopupContent(`<b>NEARBY CITIZEN: Priya Deshmukh</b><br>DURGA Community Mesh Node<br>~350m from Victim (${appState.victimLocation.name})`);
   }
 
   if (appState.nearestStation) {
@@ -1040,6 +1077,109 @@ function testSoundScenario(type) {
   }
 }
 
+// --- 16.5 Map Community Mesh Vectoring ---
+function highlightMeshLinkOnMap() {
+  if (!leafletMap || !victimMarker || !nearbyCitizenMarker) return;
+  const vPos = victimMarker.getLatLng();
+  const nPos = nearbyCitizenMarker.getLatLng();
+
+  if (meshPolyline) leafletMap.removeLayer(meshPolyline);
+  meshPolyline = L.polyline([vPos, nPos], {
+    color: '#10B981',
+    weight: 3,
+    dashArray: '5, 8',
+    opacity: 0.95
+  }).addTo(leafletMap);
+
+  leafletMap.fitBounds([vPos, nPos], { padding: [50, 50] });
+}
+
+function clearMeshLinkOnMap() {
+  if (meshPolyline && leafletMap) {
+    leafletMap.removeLayer(meshPolyline);
+    meshPolyline = null;
+  }
+}
+
+// --- 16.6 Laptop Simulator View Switcher ---
+function switchSimulatorView(view) {
+  const cards = {
+    user: document.getElementById("userDeviceCard"),
+    nearby: document.getElementById("nearbyCitizenCard"),
+    contact: document.getElementById("contactDeviceCard"),
+    responder: document.getElementById("responderDeviceCard")
+  };
+  const grid = document.getElementById("deviceMeshGrid");
+  const buttons = {
+    all: document.getElementById("viewBtnAll"),
+    user: document.getElementById("viewBtnVictim"),
+    nearby: document.getElementById("viewBtnNearby"),
+    contact: document.getElementById("viewBtnGuardian"),
+    responder: document.getElementById("viewBtnPolice")
+  };
+
+  Object.values(buttons).forEach(btn => btn?.classList.remove("active"));
+  if (buttons[view]) buttons[view].classList.add("active");
+
+  if (view === "all") {
+    grid?.classList.remove("single-device-view");
+    Object.values(cards).forEach(card => card?.classList.remove("view-hidden"));
+    logAuditEvent("Laptop View: Displaying All 4 Mesh Nodes in Grid View.", "normal");
+  } else {
+    grid?.classList.add("single-device-view");
+    Object.entries(cards).forEach(([key, card]) => {
+      if (key === view) {
+        card?.classList.remove("view-hidden");
+      } else {
+        card?.classList.add("view-hidden");
+      }
+    });
+    logAuditEvent(`Laptop View: Focused single-device inspection mode (${view.toUpperCase()}).`, "normal");
+  }
+}
+window.switchSimulatorView = switchSimulatorView;
+
+// --- 16.7 Proximity Mesh Citizen Alert Simulation ---
+function triggerNearbyMeshCitizenAlert() {
+  playAlarmSiren();
+  logAuditEvent("🚨 [PROXIMITY MESH] Nearby citizen Priya Deshmukh received encrypted distress token (~350m away). Android OS Heads-Up Notification & In-App Dialog triggered.", "critical");
+
+  const osNotif = document.getElementById("meshOsNotification");
+  const inAppDialog = document.getElementById("meshInAppDialog");
+  const nearbyCard = document.getElementById("nearbyCitizenCard");
+  const nearbyPill = document.getElementById("nearbyStatusPill");
+
+  if (osNotif) osNotif.classList.add("show");
+  if (inAppDialog) inAppDialog.classList.add("show");
+  if (nearbyCard) nearbyCard.classList.add("emergency-active");
+  if (nearbyPill) {
+    nearbyPill.textContent = "EMERGENCY (~350m)";
+    nearbyPill.className = "status-pill emergency";
+  }
+
+  highlightMeshLinkOnMap();
+}
+
+function dismissNearbyMeshCitizenAlert() {
+  const osNotif = document.getElementById("meshOsNotification");
+  const inAppDialog = document.getElementById("meshInAppDialog");
+  const nearbyCard = document.getElementById("nearbyCitizenCard");
+  const nearbyPill = document.getElementById("nearbyStatusPill");
+  const modal = document.getElementById("proximityMeshModal");
+
+  if (osNotif) osNotif.classList.remove("show");
+  if (inAppDialog) inAppDialog.classList.remove("show");
+  if (nearbyCard) nearbyCard.classList.remove("emergency-active");
+  if (nearbyPill) {
+    nearbyPill.textContent = "IDLE (MESH)";
+    nearbyPill.className = "status-pill idle";
+  }
+  if (modal) modal.classList.remove("open");
+
+  clearMeshLinkOnMap();
+  logAuditEvent("Proximity mesh citizen alert dismissed.", "normal");
+}
+
 // --- 17. Initialization & Event Binding ---
 document.addEventListener("DOMContentLoaded", () => {
   initAccelerometerCanvas();
@@ -1049,11 +1189,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Top bar buttons
   document.getElementById("btnRunFullDemo")?.addEventListener("click", runFullEmergencyDemo);
+  document.getElementById("btnRunNearbyMeshDemo")?.addEventListener("click", triggerNearbyMeshCitizenAlert);
   document.getElementById("btnRunFalseAlarm")?.addEventListener("click", runFalseAlarmDemo);
-  document.getElementById("btnResetSim")?.addEventListener("click", () => setEmergencyState(EmergencyState.IDLE));
+  document.getElementById("btnResetSim")?.addEventListener("click", () => {
+    dismissNearbyMeshCitizenAlert();
+    setEmergencyState(EmergencyState.IDLE);
+  });
   document.getElementById("btnOpenLab")?.addEventListener("click", openAcousticLabModal);
 
-  // User Device triggers
+  // Victim Device triggers
   document.getElementById("btnTriggerShake")?.addEventListener("click", simulatePhoneShake);
   document.getElementById("btnSosBig")?.addEventListener("click", () => {
     if (appState.currentState === EmergencyState.IDLE) {
@@ -1061,6 +1205,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("btnCancelCountdown")?.addEventListener("click", cancelCountdown);
+
+  // Nearby Citizen Device triggers
+  document.getElementById("btnTriggerNearbyFromDevice")?.addEventListener("click", triggerNearbyMeshCitizenAlert);
+  document.getElementById("btnNotifOpenPopup")?.addEventListener("click", () => {
+    const osNotif = document.getElementById("meshOsNotification");
+    const inAppDialog = document.getElementById("meshInAppDialog");
+    if (osNotif) osNotif.classList.remove("show");
+    if (inAppDialog) inAppDialog.classList.add("show");
+  });
+  document.getElementById("btnNotifDismiss")?.addEventListener("click", () => {
+    const osNotif = document.getElementById("meshOsNotification");
+    if (osNotif) osNotif.classList.remove("show");
+  });
+  document.getElementById("btnNearbyDialogDismiss")?.addEventListener("click", dismissNearbyMeshCitizenAlert);
+  document.getElementById("btnNearbyDialogAssist")?.addEventListener("click", () => {
+    highlightMeshLinkOnMap();
+    alert("Navigating to Victim coordinates: FC Road (~350m away). Dotted green response route highlighted on Tactical Leaflet Map.");
+  });
+  document.getElementById("btnNearbyDialogCall112")?.addEventListener("click", () => {
+    alert("Dialing 112 (Police Control Room) with relayed coordinates of Victim Ananya Sharma.");
+  });
+
+  // Modal Fallback Triggers
+  document.getElementById("btnCloseProximityModal")?.addEventListener("click", dismissNearbyMeshCitizenAlert);
+  document.getElementById("btnModalRespondMap")?.addEventListener("click", () => {
+    dismissNearbyMeshCitizenAlert();
+    highlightMeshLinkOnMap();
+  });
+  document.getElementById("btnModalCall112")?.addEventListener("click", () => {
+    alert("Dialing 112 (Police Control Room) with relayed mesh incident telemetry.");
+  });
 
   // Contact Device player
   document.getElementById("btnPlayAudio")?.addEventListener("click", toggleRecordedAudioPlayback);

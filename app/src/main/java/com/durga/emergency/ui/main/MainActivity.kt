@@ -17,6 +17,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.durga.emergency.R
 import com.durga.emergency.audio.DurgaAudioPlayer
@@ -25,6 +31,7 @@ import com.durga.emergency.databinding.ActivityMainBinding
 import com.durga.emergency.emergency.EmergencyState
 import com.durga.emergency.emergency.UserRole
 import com.durga.emergency.sensors.ShakeDetector
+import com.durga.emergency.service.DurgaFirebaseMessagingService
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class MainActivity : AppCompatActivity() {
@@ -165,6 +172,30 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Incident closed. Returning to protected state.", Toast.LENGTH_SHORT).show()
             }
         }
+
+        // Simulate Nearby Mesh Citizen SOS
+        binding.btnSimulateNearbyAlert.setOnClickListener {
+            Toast.makeText(this, "📡 Simulating incoming proximity mesh SOS from nearby citizen...", Toast.LENGTH_SHORT).show()
+            viewModel.simulateNearbyMeshAlert()
+        }
+
+        // Proximity Card Actions
+        binding.btnProximityDismiss.setOnClickListener {
+            binding.cardProximityAlert.visibility = View.GONE
+            viewModel.dismissNearbyMeshAlert()
+        }
+
+        binding.btnProximityViewMap.setOnClickListener {
+            val event = viewModel.nearbyMeshAlertEvent.value
+            if (event?.latitude != null && event.longitude != null) {
+                openMapLocation(event.latitude, event.longitude, event.userName)
+            }
+        }
+
+        binding.btnProximityCall112.setOnClickListener {
+            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))
+            startActivity(dialIntent)
+        }
     }
 
     private fun playEmergencyAudio() {
@@ -239,6 +270,10 @@ class MainActivity : AppCompatActivity() {
         viewModel.activeEmergencyEvent.observe(this) { event ->
             renderContactDashboard(event)
             renderResponderDashboard(event)
+        }
+
+        viewModel.nearbyMeshAlertEvent.observe(this) { event ->
+            handleNearbyMeshAlert(event)
         }
     }
 
@@ -476,6 +511,97 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(shakeDetector)
+    }
+
+    private fun handleNearbyMeshAlert(event: EmergencyEvent?) {
+        if (event == null || event.status != "ACTIVE") {
+            binding.cardProximityAlert.visibility = View.GONE
+            return
+        }
+
+        // 1. Populate Proximity Alert Card on User screen
+        binding.cardProximityAlert.visibility = View.VISIBLE
+        binding.tvProximityVictimName.text = event.userName
+        binding.tvProximityAiStatus.text = "Acoustic AI: ${event.distressClassification}"
+        binding.tvProximityDistanceBadge.text = "~350m AWAY (MESH)"
+
+        // 2. Send real Android OS Heads-Up Notification with High Priority
+        sendLocalProximityNotification(event)
+
+        // 3. Show In-App Emergency Modal Popup Dialog on the screen
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🚨 CRITICAL SOS: NEARBY CITIZEN IN DISTRESS")
+            .setMessage(
+                "Proximity mesh detection: A citizen (${event.userName}) is in critical distress ~350m from your current location!\n\n" +
+                "• Acoustic AI Assessment: ${event.distressClassification}\n" +
+                "• Assigned Station: ${event.nearestPoliceStationName}\n" +
+                "• Incident ID: ${event.eventId}\n\n" +
+                "Are you able to assist or coordinate with emergency responders?"
+            )
+            .setPositiveButton("🚨 VIEW ON MAP & RESPOND") { _, _ ->
+                openMapLocation(event.latitude ?: 18.5204, event.longitude ?: 73.8567, event.userName)
+            }
+            .setNegativeButton("📞 CALL 112 (POLICE)") { _, _ ->
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
+            }
+            .setNeutralButton("DISMISS", null)
+            .show()
+    }
+
+    private fun sendLocalProximityNotification(event: EmergencyEvent) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = DurgaFirebaseMessagingService.CHANNEL_ID
+        val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                DurgaFirebaseMessagingService.CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "High-priority emergency alerts from protected citizens in proximity mesh"
+                enableLights(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500)
+                setSound(
+                    alarmSound,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_EVENT_ID", event.eventId)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            event.eventId.hashCode(),
+            intent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.bg_badge_high)
+            .setContentTitle("🚨 NEARBY CITIZEN SOS: ${event.userName}")
+            .setContentText("Distress ~350m away. AI Scream Detected. Tap to respond.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "Citizen ${event.userName} triggered an emergency ~350m away.\n" +
+                "AI Analysis: ${event.distressClassification}\n" +
+                "Nearest Station: ${event.nearestPoliceStationName}"
+            ))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(event.eventId.hashCode(), notification)
     }
 
     override fun onDestroy() {

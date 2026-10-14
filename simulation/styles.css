@@ -276,12 +276,184 @@ body {
   width: 100%;
 }
 
-/* Tri-Device Grid */
+/* Laptop Simulator View Selector Bar */
+.device-view-selector-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 18px;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.view-selector-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--cyan-telemetry);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.view-selector-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.view-btn {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.view-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+
+.view-btn.active {
+  background: rgba(225, 29, 72, 0.22);
+  border-color: var(--red-alert);
+  color: #FDA4AF;
+  box-shadow: 0 0 12px var(--red-alert-glow);
+}
+
+.device-card.view-hidden {
+  display: none !important;
+}
+
+.device-mesh-grid.single-device-view {
+  grid-template-columns: minmax(320px, 460px) !important;
+  justify-content: center !important;
+}
+
+/* 4-Device Proximity Mesh Grid */
+.device-mesh-grid,
 .device-trio-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(360px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(4, minmax(300px, 1fr));
+  gap: 20px;
   align-items: start;
+}
+
+@media (max-width: 1560px) {
+  .device-mesh-grid,
+  .device-trio-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 820px) {
+  .device-mesh-grid,
+  .device-trio-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Android OS Heads-Up Notification Shade (for Nearby Citizen Device) */
+.os-notification-shade {
+  position: absolute;
+  top: 36px;
+  left: 10px;
+  right: 10px;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--red-alert);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.85), 0 0 20px var(--red-alert-glow);
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  animation: slideDownNotif 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.os-notification-shade.show {
+  display: flex;
+}
+
+@keyframes slideDownNotif {
+  from { transform: translateY(-50px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.os-notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: #94A3B8;
+}
+
+.os-notif-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: #FDA4AF;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.os-notif-body {
+  font-size: 0.72rem;
+  color: #F8FAFC;
+  line-height: 1.35;
+}
+
+/* In-App Proximity Alert Popup Dialog (Overlaid on screen) */
+.in-app-proximity-dialog {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(11, 17, 32, 0.94);
+  backdrop-filter: blur(8px);
+  z-index: 55;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  animation: fadeIn 0.3s ease;
+}
+
+.in-app-proximity-dialog.show {
+  display: flex;
+}
+
+.proximity-card-box {
+  background: rgba(15, 23, 42, 0.95);
+  border: 2px solid var(--red-alert);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 0 35px var(--red-alert-glow);
+  width: 100%;
 }
 
 /* Device Containers */
@@ -1115,6 +1287,10 @@ body {
   height: 420px;
   width: 100%;
   background: #0B1120;
+}
+
+#leafletMapContainer .leaflet-tile {
+  filter: brightness(0.65) invert(1) contrast(2.6) hue-rotate(200deg) saturate(0.35);
 }
 
 /* Audit Log Card */

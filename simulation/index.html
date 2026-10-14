@@ -35,6 +35,9 @@
       <button id="btnRunFullDemo" class="btn-ctrl btn-ctrl-primary" title="Automates full end-to-end incident lifecycle">
         ⚡ Run Full Emergency Demo
       </button>
+      <button id="btnRunNearbyMeshDemo" class="btn-ctrl" style="border-color: rgba(225,29,72,0.5); color: #FDA4AF;" title="Simulate incoming proximity SOS popup on nearby citizen device">
+        📡 Nearby Citizen Mesh Alert
+      </button>
       <button id="btnRunFalseAlarm" class="btn-ctrl" title="Demonstrates cancellation within 5s verification window">
         🛡️ False Alarm Demo
       </button>
@@ -100,7 +103,31 @@
 
   <!-- 3. Main Dashboard: Three Synchronized Device Mockups -->
   <main class="main-wrapper">
-    <section class="device-trio-grid">
+    <!-- Laptop Simulator View Selector Bar -->
+    <div class="device-view-selector-bar">
+      <div class="view-selector-label">
+        <span>🖥️ LAPTOP SIMULATOR VIEW:</span>
+      </div>
+      <div class="view-selector-buttons">
+        <button id="viewBtnAll" class="view-btn active" onclick="switchSimulatorView('all')">
+          👥 All 4 Mesh Nodes
+        </button>
+        <button id="viewBtnVictim" class="view-btn" onclick="switchSimulatorView('user')">
+          📱 1. Victim Phone
+        </button>
+        <button id="viewBtnNearby" class="view-btn" onclick="switchSimulatorView('nearby')">
+          📡 2. Nearby Citizen Phone
+        </button>
+        <button id="viewBtnGuardian" class="view-btn" onclick="switchSimulatorView('contact')">
+          📲 3. Guardian Phone
+        </button>
+        <button id="viewBtnPolice" class="view-btn" onclick="switchSimulatorView('responder')">
+          🚔 4. Police Dispatch CAD
+        </button>
+      </div>
+    </div>
+
+    <section id="deviceMeshGrid" class="device-mesh-grid">
 
       <!-- DEVICE 1: USER / VICTIM DEVICE -->
       <article id="userDeviceCard" class="device-card">
@@ -206,6 +233,120 @@
                 <span id="userNearestStationVal" class="val">Central Police Station (1.42 km)</span>
               </div>
             </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- DEVICE 2: NEARBY CITIZEN SMARTPHONE (PROXIMITY MESH NODE) -->
+      <article id="nearbyCitizenCard" class="device-card">
+        <div class="device-header-strip">
+          <div class="device-role-tag">
+            <span style="color: #FDA4AF;">📡 NEARBY CITIZEN PHONE</span>
+            <span class="tag-badge" style="font-size: 0.6rem; border-color: rgba(225,29,72,0.4); color: #FDA4AF;">MESH NODE</span>
+          </div>
+          <span id="nearbyStatusPill" class="status-pill idle">IDLE (MESH)</span>
+        </div>
+
+        <div class="phone-viewport">
+          <div class="phone-top-notch">
+            <div class="notch-camera"></div>
+          </div>
+          <div class="phone-status-bar">
+            <span>08:14</span>
+            <span>5G • 96% 🔋</span>
+          </div>
+
+          <!-- Android OS Heads-Up Notification Shade (slides down over screen) -->
+          <div id="meshOsNotification" class="os-notification-shade">
+            <div class="os-notif-header">
+              <span>🛡️ DURGA COMMUNITY MESH</span>
+              <span>JUST NOW</span>
+            </div>
+            <div class="os-notif-title">
+              <span>🚨 EMERGENCY ALERT NEARBY</span>
+              <span class="tag-badge" style="background:#E11D48; color:white; font-size:0.6rem; padding:1px 5px;">~350m</span>
+            </div>
+            <div class="os-notif-body">
+              <b>Ananya Sharma</b> triggered SOS on FC Road. AI Distress: High (Scream 91%).
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button id="btnNotifOpenPopup" class="btn-ctrl" style="flex:1; padding:4px 8px; font-size:0.7rem; background:#E11D48; color:white; border:none; justify-content:center;">VIEW ALERT</button>
+              <button id="btnNotifDismiss" class="btn-ctrl" style="padding:4px 8px; font-size:0.7rem; background:#334155; border:none;">✕</button>
+            </div>
+          </div>
+
+          <!-- In-App Proximity Popup Dialog (overlaid inside app) -->
+          <div id="meshInAppDialog" class="in-app-proximity-dialog">
+            <div class="proximity-card-box">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-family:var(--font-mono); font-size:0.68rem; color:#FDA4AF; font-weight:700;">🚨 NEARBY CITIZEN SOS (MESH)</span>
+                <span class="tag-badge" style="background:#E11D48; color:white;">~350m AWAY</span>
+              </div>
+              <div style="text-align:left;">
+                <div style="font-size:0.92rem; font-weight:700; color:white;">Ananya Sharma</div>
+                <div style="font-size:0.7rem; color:#67E8F9; font-family:var(--font-mono); margin-top:2px;">📍 FC Road (Opposite Starbucks)</div>
+                <div style="font-size:0.72rem; color:#FDE68A; margin-top:4px;">AI Distress: High (Scream Detected - 91%)</div>
+                <div style="font-size:0.68rem; color:var(--text-muted); margin-top:4px; line-height:1.35;">
+                  You are within the emergency radius. Please coordinate assistance or contact emergency authorities.
+                </div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+                <button id="btnNearbyDialogAssist" class="btn-ctrl" style="padding:8px 10px; font-size:0.76rem; background:#10B981; color:white; border:none; justify-content:center; font-weight:700;">
+                  🧭 View on Map & Assist
+                </button>
+                <button id="btnNearbyDialogCall112" class="btn-ctrl" style="padding:6px 10px; font-size:0.74rem; background:#2563EB; color:white; border:none; justify-content:center;">
+                  📞 Call Police Control (112)
+                </button>
+                <button id="btnNearbyDialogDismiss" class="btn-ctrl" style="padding:4px 10px; font-size:0.7rem; background:#334155; color:#94A3B8; border:none; justify-content:center;">
+                  ✕ Dismiss Alert
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Normal Screen Content -->
+          <div class="phone-screen-content">
+            <div class="user-hero-card" style="border-color: rgba(244,63,94,0.25);">
+              <div class="welcome-text">COMMUNITY MESH NODE</div>
+              <div class="user-name">Priya Deshmukh</div>
+              <div style="font-size:0.68rem; color:#10B981; margin-top:3px;">● Mesh Node Active & Listening</div>
+            </div>
+
+            <!-- Proximity Status Banner on Normal Screen -->
+            <div id="nearbyBannerStandby" style="background:rgba(15,23,42,0.7); border:1px solid var(--border-subtle); border-radius:12px; padding:12px; text-align:center;">
+              <div style="font-size:26px; margin-bottom:6px;">🛡️</div>
+              <div style="font-weight:700; font-size:0.82rem; color:#F8FAFC;">Mesh Perimeter Active</div>
+              <div style="font-size:0.7rem; color:#94A3B8; margin-top:4px; line-height:1.4;">
+                DURGA Wi-Fi / BLE & Cloud Proximity Mesh continuously monitors for encrypted distress tokens within 500m.
+              </div>
+            </div>
+
+            <!-- Quick Proximity Simulation Trigger on Device -->
+            <div style="background:rgba(15,23,42,0.8); border:1px dashed rgba(244,63,94,0.4); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:8px;">
+              <div style="font-family:var(--font-mono); font-size:0.68rem; color:#FDA4AF; font-weight:700;">
+                TEST MESH NOTIFICATION
+              </div>
+              <div style="font-size:0.7rem; color:var(--text-muted); line-height:1.35;">
+                Simulate incoming SOS packet broadcast from Victim Node (~350m away).
+              </div>
+              <button id="btnTriggerNearbyFromDevice" class="btn-ctrl" style="background:rgba(225,29,72,0.2); border:1px solid var(--red-alert); color:#FDA4AF; justify-content:center; font-size:0.74rem;">
+                📡 Trigger Proximity SOS
+              </button>
+            </div>
+
+            <!-- Community Safe Hubs -->
+            <div style="background:rgba(15,23,42,0.6); border:1px solid var(--border-subtle); border-radius:10px; padding:10px; font-size:0.7rem;">
+              <div style="color:#67E8F9; font-weight:700; margin-bottom:4px;">NEIGHBORHOOD BEATS</div>
+              <div style="color:var(--text-main); display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span>FC Road Police Chowki</span>
+                <span style="color:#10B981;">Open (420m)</span>
+              </div>
+              <div style="color:var(--text-main); display:flex; justify-content:space-between;">
+                <span>Fergusson College Gate</span>
+                <span style="color:#60A5FA;">Safe Zone (180m)</span>
+              </div>
+            </div>
+
           </div>
         </div>
       </article>
@@ -433,6 +574,35 @@
         </div>
 
         <div id="labTestResult"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Proximity Mesh Alert Modal Popup -->
+  <div id="proximityMeshModal" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width: 480px; border-color: var(--red-alert); box-shadow: 0 0 40px var(--red-alert-glow);">
+      <div class="modal-header" style="background: rgba(225,29,72,0.2);">
+        <h2 style="color: #FDA4AF; font-size: 1.05rem;">🚨 CRITICAL SOS: NEARBY CITIZEN IN DISTRESS</h2>
+        <button id="btnCloseProximityModal" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="gap: 12px;">
+        <div style="background: rgba(15,23,42,0.8); border: 1px solid rgba(225,29,72,0.3); border-radius: 8px; padding: 12px;">
+          <div style="font-size: 0.95rem; font-weight: 700; color: white;">Priya Deshmukh (Nearby Citizen)</div>
+          <div style="font-size: 0.75rem; color: #67E8F9; font-family: monospace; margin-top: 4px;">Proximity Distance: ~350 meters away</div>
+          <div style="font-size: 0.75rem; color: #FDE68A; margin-top: 2px;">AI Acoustic Analysis: High Distress (Screaming Detected - 91%)</div>
+          <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 2px;">Nearest Station: Central Police Station (Shivajinagar)</div>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+          DURGA Community Mesh Alert: You are located within the emergency radius of a fellow protected citizen. Can you provide assistance or coordinate with police responders?
+        </p>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnModalRespondMap" class="btn-ctrl btn-ctrl-primary" style="flex: 1; justify-content: center;">
+            🚨 View on Map & Assist
+          </button>
+          <button id="btnModalCall112" class="btn-ctrl btn-ctrl-cyan" style="flex: 1; justify-content: center;">
+            📞 Call 112
+          </button>
+        </div>
       </div>
     </div>
   </div>

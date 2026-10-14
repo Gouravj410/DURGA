@@ -1,11 +1,11 @@
 # ==============================================================================
-# DURGA — Dynamic Unified Response & Geo-Alert System
-# Laptop Demonstration & Architecture Showcase Launcher
+# DURGA - Dynamic Unified Response and Geo-Alert System
+# Laptop Demonstration and Architecture Showcase Launcher
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host "  DURGA — Dynamic Unified Response & Geo-Alert System" -ForegroundColor Red
-Write-Host "  Laptop Interactive Demonstration & System Showcase" -ForegroundColor White
+Write-Host "  DURGA - Dynamic Unified Response and Geo-Alert System" -ForegroundColor Red
+Write-Host "  Laptop Interactive Demonstration and System Showcase" -ForegroundColor White
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -45,11 +45,13 @@ Write-Host ""
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host "  DURGA Laptop Showcase is now LIVE in your browser!" -ForegroundColor Green
 Write-Host "  Features to demonstrate:" -ForegroundColor White
-Write-Host "    1. Click '⚡ Run Full Emergency Demo' for automated showcase" -ForegroundColor White
-Write-Host "    2. Click '👋 Shake Device' or '🚨 SOS' on Victim Phone" -ForegroundColor White
-Write-Host "    3. Watch 5-sec countdown & Cancel verification feature" -ForegroundColor White
-Write-Host "    4. Observe 16-bit PCM Audio Waveform & AI Acoustic Engine" -ForegroundColor White
-Write-Host "    5. Test play ambient audio evidence on Contact Phone" -ForegroundColor White
-Write-Host "    6. Acknowledge, Dispatch, and Resolve from Police CAD" -ForegroundColor White
-Write-Host "    7. Watch moving police cruiser along vector on Leaflet Map" -ForegroundColor White
+Write-Host "    1. Click 'Run Full Emergency Demo' for automated 4-node showcase" -ForegroundColor White
+Write-Host "    2. Click 'Shake Device' or 'SOS' on Victim Phone (Node 1)" -ForegroundColor White
+Write-Host "    3. Watch 5-sec countdown and Cancel verification feature" -ForegroundColor White
+Write-Host "    4. Observe 16-bit PCM Audio Waveform and AI Acoustic Engine" -ForegroundColor White
+Write-Host "    5. See Android OS Heads-Up Notification and Popup on Nearby Citizen (Node 2)" -ForegroundColor White
+Write-Host "    6. Test play ambient audio evidence on Guardian Phone (Node 3)" -ForegroundColor White
+Write-Host "    7. Acknowledge, Dispatch, and Resolve from Police CAD (Node 4)" -ForegroundColor White
+Write-Host "    8. Watch moving police cruiser along vector on Leaflet Map" -ForegroundColor White
+Write-Host "    9. Use Laptop View Switcher to inspect any single device or all 4 nodes" -ForegroundColor White
 Write-Host "=================================================================" -ForegroundColor Cyan

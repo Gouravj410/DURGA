@@ -183,6 +183,117 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
+                <!-- Nearby Community Mesh Proximity Alert Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardProximityAlert"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:visibility="gone"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/durga_card_bg"
+                    app:strokeColor="@color/durga_red_bright"
+                    app:strokeWidth="2dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="🚨 NEARBY CITIZEN SOS (MESH)"
+                                android:textColor="@color/durga_red_bright"
+                                android:textSize="13sp"
+                                android:textStyle="bold"
+                                android:letterSpacing="0.05" />
+
+                            <TextView
+                                android:id="@+id/tvProximityDistanceBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/bg_badge_high"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:paddingTop="2dp"
+                                android:paddingBottom="2dp"
+                                android:text="~350m AWAY"
+                                android:textColor="@color/white"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvProximityVictimName"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Priya Deshmukh (Nearby Citizen)"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:layout_marginTop="8dp" />
+
+                        <TextView
+                            android:id="@+id/tvProximityAiStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Acoustic AI: High Distress (Scream Detected - 91%)"
+                            android:textColor="@color/durga_amber_warning"
+                            android:textSize="12sp"
+                            android:layout_marginTop="2dp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginTop="12dp">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnProximityViewMap"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1"
+                                android:text="VIEW MAP"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:layout_marginEnd="4dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnProximityCall112"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1"
+                                android:text="CALL 112"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/durga_blue_accent"
+                                app:strokeColor="@color/durga_blue_accent"
+                                android:layout_marginStart="4dp"
+                                android:layout_marginEnd="4dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnProximityDismiss"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="38dp"
+                                android:text="DISMISS"
+                                android:textSize="11sp"
+                                android:textColor="@color/text_muted" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <!-- SOS Activation Hero Area -->
                 <FrameLayout
                     android:layout_width="match_parent"
@@ -415,6 +526,22 @@
                             android:textSize="12sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
+
+                <!-- Simulate Nearby Citizen SOS in Proximity Mesh Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSimulateNearbyAlert"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="📡 SIMULATE NEARBY CITIZEN SOS (MESH)"
+                    android:textColor="@color/durga_blue_accent"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:strokeColor="@color/durga_blue_accent"
+                    app:strokeWidth="1dp"
+                    app:cornerRadius="12dp" />
 
             </LinearLayout>
 
