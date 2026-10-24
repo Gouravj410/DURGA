@@ -11,45 +11,55 @@ import com.durga.emergency.ai.DistressAnalyzer
 import com.durga.emergency.ai.DurgaScoringDistressAnalyzer
 import com.durga.emergency.audio.AudioRecorder
 import com.durga.emergency.audio.DurgaPcmAudioRecorder
-import com.durga.emergency.data.EmergencyRepository
-import com.durga.emergency.data.FirestoreEmergencyRepository
 import com.durga.emergency.data.LocalPoliceStationRepository
 import com.durga.emergency.data.PoliceStationRepository
 import com.durga.emergency.data.PreferencesManager
+import com.durga.emergency.data.api.DurgaApiClient
 import com.durga.emergency.data.model.EmergencyEvent
-import com.durga.emergency.emergency.EmergencyState
+import com.durga.emergency.emergency.IncidentEvent
+import com.durga.emergency.emergency.IncidentState
+import com.durga.emergency.emergency.IncidentStateMachine
+import com.durga.emergency.emergency.TriggerSource
 import com.durga.emergency.emergency.UserRole
 import com.durga.emergency.location.DurgaLocation
 import com.durga.emergency.location.FusedLocationProvider
 import com.durga.emergency.location.LocationProvider
-import kotlinx.coroutines.flow.collectLatest
+import com.durga.emergency.mesh.DirectMeshManager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
-import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
-        private const val TAG = "DURGA"
-        private const val CANCEL_WINDOW_SECONDS = 5
+        private const val TAG = "DURGA_VIEW_MODEL"
+        private const val SAFETY_PROMPT_TIMEOUT_SECONDS = 10
     }
 
     private val prefs = PreferencesManager(application)
-    private val firestoreRepo: FirestoreEmergencyRepository = FirestoreEmergencyRepository.getInstance(application)
-    private val emergencyRepo: EmergencyRepository = firestoreRepo
+    private val apiClient = DurgaApiClient.getInstance(application)
+    private val directMesh = DirectMeshManager.getInstance(application)
     private val policeRepo: PoliceStationRepository = LocalPoliceStationRepository(application)
     private val locationProvider: LocationProvider = FusedLocationProvider(application)
     private val audioRecorder: AudioRecorder = DurgaPcmAudioRecorder(application)
     private val distressAnalyzer: DistressAnalyzer = DurgaScoringDistressAnalyzer()
 
+    private val _incidentState: MutableLiveData<IncidentState> = MutableLiveData(IncidentState.IDLE)
+    val incidentState: LiveData<IncidentState> = _incidentState
+
+    // Incident State Machine
+    val stateMachine: IncidentStateMachine = IncidentStateMachine { from, to, event ->
+        Log.d(TAG, "[FSM] State transition: $from -> $to (Triggered by ${event.javaClass.simpleName})")
+        _incidentState.postValue(to)
+    }
+
     private val _currentRole = MutableLiveData(prefs.selectedRole)
     val currentRole: LiveData<UserRole> = _currentRole
 
-    private val _emergencyState = MutableLiveData(EmergencyState.IDLE)
-    val emergencyState: LiveData<EmergencyState> = _emergencyState
-
-    private val _countdownSeconds = MutableLiveData(CANCEL_WINDOW_SECONDS)
-    val countdownSeconds: LiveData<Int> = _countdownSeconds
+    private val _safetyPromptSeconds = MutableLiveData(SAFETY_PROMPT_TIMEOUT_SECONDS)
+    val safetyPromptSeconds: LiveData<Int> = _safetyPromptSeconds
 
     private val _recordingSecondsRemaining = MutableLiveData(5)
     val recordingSecondsRemaining: LiveData<Int> = _recordingSecondsRemaining
@@ -57,90 +67,426 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeEmergencyEvent = MutableLiveData<EmergencyEvent?>()
     val activeEmergencyEvent: LiveData<EmergencyEvent?> = _activeEmergencyEvent
 
-    private val _allEmergencyEvents = MutableLiveData<List<EmergencyEvent>>(emptyList())
-    val allEmergencyEvents: LiveData<List<EmergencyEvent>> = _allEmergencyEvents
-
     private val _locationInfo = MutableLiveData("Standby")
     val locationInfo: LiveData<String> = _locationInfo
 
     private val _aiDistressInfo = MutableLiveData("Model Standby")
     val aiDistressInfo: LiveData<String> = _aiDistressInfo
 
+    private val _nearestStationInfo = MutableLiveData("Scanning...")
+    val nearestStationInfo: LiveData<String> = _nearestStationInfo
+
     private val _userName = MutableLiveData(prefs.userName)
     val userName: LiveData<String> = _userName
-
-    private val _contactName = MutableLiveData(prefs.contactName)
-    val contactName: LiveData<String> = _contactName
 
     private val _contactPhone = MutableLiveData(prefs.contactPhone)
     val contactPhone: LiveData<String> = _contactPhone
 
-    val isFirstLaunch: Boolean
-        get() = prefs.isFirstLaunch
+    private val _pinAttemptsLeft = MutableLiveData(IncidentStateMachine.MAX_PIN_ATTEMPTS)
+    val pinAttemptsLeft: LiveData<Int> = _pinAttemptsLeft
 
-    fun setFirstLaunchCompleted() {
-        prefs.isFirstLaunch = false
-    }
+    private val _pinErrorMessage = MutableLiveData<String?>()
+    val pinErrorMessage: LiveData<String?> = _pinErrorMessage
 
-    private var countdownTimer: CountDownTimer? = null
-
+    // Nearby Community Mesh Proximity Alerts (Alerts Phone B when Phone A triggers SOS)
     private val _nearbyMeshAlertEvent = MutableLiveData<EmergencyEvent?>()
     val nearbyMeshAlertEvent: LiveData<EmergencyEvent?> = _nearbyMeshAlertEvent
 
-    init {
-        // Observe real-time repository events (Firestore + local fallback)
-        viewModelScope.launch {
-            emergencyRepo.activeEvents.collectLatest { events ->
-                _allEmergencyEvents.value = events
-                val latest = events.firstOrNull()
-                _activeEmergencyEvent.value = latest
+    private var safetyTimer: CountDownTimer? = null
+    private var locationStreamingJob: Job? = null
+    private var proximityMonitoringJob: Job? = null
 
-                // If an incoming event is active from another citizen in the mesh, alert the user
-                if (latest != null && latest.status == "ACTIVE" && latest.userId != "USER-001") {
-                    _nearbyMeshAlertEvent.value = latest
+    init {
+        // Authenticate development session with the backend (optional) and register device
+        ensureBackendSession()
+        startProximityMonitoring()
+        startDirectMeshListener()
+    }
+
+    private fun startDirectMeshListener() {
+        directMesh.startListening(
+            myUserId = prefs.userId,
+            onAlert = { event ->
+                Log.i(TAG, "🚨 [DIRECT MESH ALERT RECEIVED] Victim: ${event.userName}, Phone: ${event.emergencyContactPhone}")
+                _nearbyMeshAlertEvent.postValue(event)
+            },
+            onCancel = { cancelledUserId ->
+                Log.i(TAG, "Direct mesh cancellation received from user $cancelledUserId")
+                if (_nearbyMeshAlertEvent.value?.userId == cancelledUserId) {
+                    _nearbyMeshAlertEvent.postValue(null)
+                }
+            }
+        )
+    }
+
+    private fun ensureBackendSession() {
+        viewModelScope.launch {
+            try {
+                withTimeoutOrNull(2500) {
+                    val phone = prefs.userPhone
+                    val name = prefs.userName
+
+                    // Request test OTP and verify
+                    val otpResult = apiClient.requestOtp(phone)
+                    val testOtp = otpResult.getOrNull() ?: "123456"
+
+                    val authResult = apiClient.verifyOtp(phone, testOtp, name, "CITIZEN")
+                    if (authResult.isSuccess) {
+                        val auth = authResult.getOrThrow()
+                        prefs.userId = auth.userId
+                        prefs.authToken = auth.token
+                        Log.d(TAG, "Backend authenticated successfully as ${auth.userId} (${auth.name})")
+
+                        // Acquire initial GPS location
+                        val loc = locationProvider.getCurrentLocation()
+                        apiClient.registerDevice(
+                            fcmToken = "DURGA_DEVICE_TOKEN_${phone.takeLast(4)}",
+                            latitude = loc?.latitude,
+                            longitude = loc?.longitude,
+                            accuracy = loc?.accuracy
+                        )
+                    } else {
+                        Log.w(TAG, "Backend authentication note: ${authResult.exceptionOrNull()?.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Backend connection note: Operating in 100% autonomous mesh mode (${e.message})")
+            }
+        }
+    }
+
+    /**
+     * Continuous 2.5-second polling loop against the central backend.
+     * When any phone within 1.0 km radius triggers SOS, this immediately alerts this device.
+     */
+    fun startProximityMonitoring() {
+        proximityMonitoringJob?.cancel()
+        proximityMonitoringJob = viewModelScope.launch {
+            while (true) {
+                try {
+                    // Only monitor if this phone is not currently in its own active emergency
+                    val state = stateMachine.currentState
+                    if (state == IncidentState.IDLE ||
+                        state == IncidentState.CANCELLED ||
+                        state == IncidentState.RESOLVED) {
+
+                        val loc = locationProvider.getCurrentLocation()
+                        val lat = loc?.latitude ?: 18.5204
+                        val lon = loc?.longitude ?: 73.8567
+                        val myUserId = prefs.userId
+
+                        val result = apiClient.getNearbyIncidents(
+                            latitude = lat,
+                            longitude = lon,
+                            radiusKm = 1.0,
+                            excludeUserId = myUserId
+                        )
+
+                        if (result.isSuccess) {
+                            val incidents = result.getOrNull() ?: emptyList()
+                            val activeIncident = incidents.firstOrNull {
+                                it.status in listOf("ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING")
+                            }
+
+                            if (activeIncident != null) {
+                                if (_nearbyMeshAlertEvent.value?.eventId != activeIncident.eventId) {
+                                    Log.i(TAG, "🚨 [PROXIMITY ALERT DETECTED] Incident: ${activeIncident.eventId} by ${activeIncident.userName}")
+                                }
+                                _nearbyMeshAlertEvent.postValue(activeIncident)
+                            } else {
+                                if (_nearbyMeshAlertEvent.value != null) {
+                                    Log.i(TAG, "Nearby incident cleared / resolved on central backend.")
+                                    _nearbyMeshAlertEvent.postValue(null)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Proximity monitoring loop note: ${e.message}")
+                }
+                delay(2500)
+            }
+        }
+    }
+
+    fun dismissProximityAlert() {
+        _nearbyMeshAlertEvent.postValue(null)
+    }
+
+    /**
+     * Triggered by in-app button, persistent notification, or 3-shake gesture.
+     */
+    fun triggerEmergency(source: TriggerSource = TriggerSource.MANUAL_SOS_BUTTON) {
+        when (stateMachine.currentState) {
+            IncidentState.IDLE, IncidentState.CANCELLED, IncidentState.RESOLVED -> {
+                Log.d(TAG, "SOS Triggered from source: $source. Starting audio capture pipeline.")
+                stateMachine.processEvent(IncidentEvent.TriggerSos(source))
+                startAudioAndInferencePipeline(source)
+            }
+            IncidentState.ACTIVE, IncidentState.ACKNOWLEDGED, IncidentState.RESPONDING -> {
+                Log.w(TAG, "Repeat SOS triggered during active incident! Locking cancellation.")
+                triggerRepeatSos()
+            }
+            else -> {
+                Log.d(TAG, "SOS trigger ignored in current state: ${stateMachine.currentState}")
+            }
+        }
+    }
+
+    /**
+     * Bypasses AI analysis, locks ordinary cancellation, and escalates to REPEAT_ACTIVE.
+     */
+    fun triggerRepeatSos() {
+        stateMachine.processEvent(IncidentEvent.RepeatSosTriggered)
+        val eventId = stateMachine.currentIncidentId
+        if (eventId != null) {
+            viewModelScope.launch {
+                apiClient.repeatSos(eventId)
+            }
+        }
+    }
+
+    private fun startAudioAndInferencePipeline(source: TriggerSource) {
+        viewModelScope.launch {
+            // STEP 1: Capture 5-second PCM Audio
+            stateMachine.processEvent(IncidentEvent.TriggerSos(source)) // Ensure in TRIGGERED
+            _recordingSecondsRemaining.value = 5
+
+            val audioFile: File? = audioRecorder.recordAudio(durationMillis = 5000L) { remaining ->
+                _recordingSecondsRemaining.postValue(remaining)
+            }
+
+            if (audioFile != null) {
+                stateMachine.processEvent(IncidentEvent.AudioRecordCompleted(audioFile))
+            } else {
+                stateMachine.processEvent(IncidentEvent.AudioRecordFailed("Microphone busy or permission denied"))
+            }
+
+            // STEP 2: On-Device Acoustic Analysis
+            val distressResult = distressAnalyzer.analyzeAudioFile(audioFile ?: File(""))
+            _aiDistressInfo.value = "${distressResult.classification} (Score: ${(distressResult.score * 100).toInt()}%)"
+
+            val isDistressDetected = distressResult.score >= 0.70f
+            stateMachine.processEvent(
+                IncidentEvent.DistressAnalysisCompleted(
+                    isDistressDetected = isDistressDetected,
+                    score = distressResult.score,
+                    confidence = distressResult.confidence
+                )
+            )
+
+            if (isDistressDetected) {
+                // High distress -> Escalating directly
+                executeEscalation(audioFile, distressResult.score, distressResult.classification, source)
+            } else {
+                // Low or uncertain distress -> Display "Are you safe?" prompt
+                startSafetyPromptTimer(audioFile, distressResult.score, distressResult.classification, source)
+            }
+        }
+    }
+
+    private fun startSafetyPromptTimer(
+        audioFile: File?,
+        distressScore: Float,
+        distressClass: String,
+        source: TriggerSource
+    ) {
+        _safetyPromptSeconds.value = SAFETY_PROMPT_TIMEOUT_SECONDS
+        safetyTimer?.cancel()
+        safetyTimer = object : CountDownTimer((SAFETY_PROMPT_TIMEOUT_SECONDS * 1000).toLong(), 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                _safetyPromptSeconds.value = (millisUntilFinished / 1000).toInt() + 1
+            }
+
+            override fun onFinish() {
+                _safetyPromptSeconds.value = 0
+                // Rule 7: Do NOT escalate solely because safety prompt timed out!
+                Log.i(TAG, "Safety prompt timed out. User did not confirm distress. Returning to IDLE.")
+                stateMachine.processEvent(IncidentEvent.SafetyPromptTimedOut)
+            }
+        }.start()
+    }
+
+    /**
+     * User confirms "I AM SAFE" on the prompt.
+     */
+    fun confirmUserSafe() {
+        safetyTimer?.cancel()
+        stateMachine.processEvent(IncidentEvent.UserConfirmedSafe)
+        _locationInfo.value = "Standby"
+        directMesh.broadcastEmergencyCancellation(prefs.userId, prefs.userName)
+    }
+
+    /**
+     * User explicitly taps "I NEED HELP" on the prompt.
+     */
+    fun requestAssistanceManually(source: TriggerSource = TriggerSource.MANUAL_SOS_BUTTON) {
+        safetyTimer?.cancel()
+        stateMachine.processEvent(IncidentEvent.UserRequestedAssistance)
+        viewModelScope.launch {
+            executeEscalation(null, 1.0f, "Manual User Escalation Verified", source)
+        }
+    }
+
+    private suspend fun executeEscalation(
+        audioFile: File?,
+        distressScore: Float,
+        distressClass: String,
+        source: TriggerSource
+    ) {
+        val location: DurgaLocation? = locationProvider.getCurrentLocation()
+        val lat = location?.latitude ?: 18.5204
+        val lon = location?.longitude ?: 73.8567
+        val accuracy = location?.accuracy ?: 12.0f
+
+        _locationInfo.value = String.format("%.4f, %.4f (±%.1fm)", lat, lon, accuracy)
+
+        // Haversine nearest police station lookup
+        val (nearestStation, distanceKm) = policeRepo.findNearestStation(lat, lon)
+        val stationName = nearestStation?.name ?: "Central Police Station"
+        _nearestStationInfo.value = "$stationName (~${String.format("%.2f", distanceKm ?: 0.0)} km)"
+
+        // Call Backend API to create incident (optional cloud sync)
+        val result = apiClient.createIncident(
+            latitude = lat,
+            longitude = lon,
+            accuracy = accuracy,
+            triggerSource = source.name,
+            distressScore = distressScore,
+            distressClass = distressClass
+        )
+
+        val incidentId = result.getOrNull()?.incidentId ?: ("INC-" + System.currentTimeMillis().toString().takeLast(6))
+
+        // 1. Direct Phone-to-Phone Emergency Mesh Broadcast (ZERO API / ZERO SERVER)
+        directMesh.startEmergencyBroadcast(
+            incidentId = incidentId,
+            userId = prefs.userId,
+            userName = prefs.userName,
+            userPhone = prefs.userPhone,
+            latitude = lat,
+            longitude = lon,
+            distressScore = distressScore,
+            distressClass = distressClass
+        )
+
+        // Upload audio evidence if available
+        if (audioFile != null && audioFile.exists()) {
+            apiClient.uploadAudio(incidentId, audioFile)
+        }
+
+        val event = EmergencyEvent(
+            eventId = incidentId,
+            userId = prefs.userId,
+            userName = _userName.value ?: "Citizen A",
+            timestamp = System.currentTimeMillis(),
+            latitude = lat,
+            longitude = lon,
+            locationAccuracy = accuracy,
+            distressScore = distressScore,
+            distressClassification = distressClass,
+            emergencyLevel = if (distressScore >= 0.7f) "HIGH" else "MEDIUM",
+            audioUrl = "",
+            emergencyContactPhone = _contactPhone.value ?: "+91-9876543210",
+            nearestPoliceStationName = stationName,
+            nearestPoliceStationDistanceKm = distanceKm,
+            status = "ACTIVE"
+        )
+
+        _activeEmergencyEvent.value = event
+        stateMachine.processEvent(IncidentEvent.IncidentEscalated(incidentId))
+
+        // Start continuous live location streaming
+        startLocationStreaming(incidentId)
+    }
+
+    private fun startLocationStreaming(incidentId: String) {
+        locationStreamingJob?.cancel()
+        locationStreamingJob = viewModelScope.launch {
+            while (stateMachine.currentState == IncidentState.ACTIVE || stateMachine.currentState == IncidentState.REPEAT_ACTIVE) {
+                delay(4000)
+                val loc = locationProvider.getCurrentLocation()
+                if (loc != null) {
+                    _locationInfo.postValue(String.format("%.4f, %.4f (±%.1fm)", loc.latitude, loc.longitude, loc.accuracy))
+                    apiClient.updateLocation(incidentId, loc.latitude, loc.longitude, loc.accuracy)
                 }
             }
         }
     }
 
     /**
-     * Simulates an incoming proximity mesh emergency from another citizen nearby.
+     * Submit PIN for cancellation.
      */
-    fun simulateNearbyMeshAlert() {
-        val currentLat = _activeEmergencyEvent.value?.latitude ?: 18.5204
-        val currentLon = _activeEmergencyEvent.value?.longitude ?: 73.8567
-        val nearbyEvent = EmergencyEvent(
-            eventId = "MESH-" + UUID.randomUUID().toString().substring(0, 6).uppercase(),
-            userId = "CITIZEN-NEARBY-77",
-            userName = "Priya Deshmukh (Nearby Citizen)",
-            timestamp = System.currentTimeMillis(),
-            latitude = currentLat + 0.0031, // ~350 meters away
-            longitude = currentLon + 0.0022,
-            locationAccuracy = 10.0f,
-            distressScore = 0.91f,
-            distressClassification = "High Distress (High-Intensity Screaming detected)",
-            emergencyLevel = "CRITICAL",
-            audioUrl = _activeEmergencyEvent.value?.audioUrl ?: "",
-            emergencyContactPhone = "+91-9876543210",
-            nearestPoliceStationName = "Central Police Station",
-            nearestPoliceStationDistanceKm = 1.15,
-            status = "ACTIVE"
-        )
-        _nearbyMeshAlertEvent.value = nearbyEvent
-        viewModelScope.launch {
-            emergencyRepo.publishEmergencyEvent(nearbyEvent)
+    fun submitCancellationPin(enteredPin: String) {
+        if (!stateMachine.isPinCancellationPermitted()) {
+            _pinErrorMessage.value = "Cancellation locked: Repeat SOS lockdown requires authorized responder."
+            return
         }
-        Log.d(TAG, "[DURGA MESH] Simulated incoming nearby citizen emergency: ${nearbyEvent.eventId}")
+
+        val storedPin = prefs.securityPin
+        val isCorrect = enteredPin.trim() == storedPin.trim()
+
+        if (isCorrect) {
+            val incidentId = stateMachine.currentIncidentId
+            if (incidentId != null) {
+                viewModelScope.launch {
+                    apiClient.cancelIncident(incidentId, enteredPin)
+                }
+            }
+            // Broadcast cancellation to all adjacent phones over Direct Mesh
+            directMesh.broadcastEmergencyCancellation(prefs.userId, prefs.userName)
+
+            stateMachine.recordPinAttempt(true)
+            locationStreamingJob?.cancel()
+            _pinErrorMessage.value = null
+            _activeEmergencyEvent.value = null
+            Log.d(TAG, "Incident cancelled successfully with verified PIN.")
+        } else {
+            val accepted = stateMachine.recordPinAttempt(false)
+            _pinAttemptsLeft.value = stateMachine.pinAttemptsRemaining
+            if (stateMachine.isPinLocked) {
+                _pinErrorMessage.value = "Too many incorrect attempts. Cancellation locked."
+            } else {
+                _pinErrorMessage.value = "Incorrect PIN. Attempts remaining: ${stateMachine.pinAttemptsRemaining}"
+            }
+        }
     }
 
-    fun dismissNearbyMeshAlert() {
-        _nearbyMeshAlertEvent.value = null
+    /**
+     * Diagnostic Test Helper: Simulates receiving a Proximity Alert on this device
+     * so you can immediately see and hear how adjacent alerting behaves even with 1 phone!
+     */
+    fun simulateTestProximityAlert() {
+        val testEvent = EmergencyEvent(
+            eventId = "INC-TEST-" + System.currentTimeMillis().toString().takeLast(4),
+            userId = "USER-TEST-ADJACENT",
+            userName = "Adjacent Citizen (Phone A)",
+            timestamp = System.currentTimeMillis(),
+            latitude = 18.5204,
+            longitude = 73.8567,
+            locationAccuracy = 5.0f,
+            distressScore = 0.94f,
+            distressClassification = "SCREAM_HIGH_DISTRESS",
+            emergencyLevel = "HIGH",
+            audioUrl = "",
+            emergencyContactPhone = "+919876543210",
+            nearestPoliceStationName = "Nearby Emergency Unit",
+            nearestPoliceStationDistanceKm = 0.05,
+            status = "ACTIVE"
+        )
+        _nearbyMeshAlertEvent.postValue(testEvent)
+    }
+
+    fun setSecurityPin(pin: String) {
+        prefs.securityPin = pin
+        viewModelScope.launch {
+            apiClient.setUserPin(pin)
+        }
     }
 
     fun setRole(role: UserRole) {
         prefs.selectedRole = role
         _currentRole.value = role
-        Log.d(TAG, "[DURGA] Active role set to: $role")
     }
 
     fun saveContactInfo(user: String, contact: String, phone: String) {
@@ -148,163 +494,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.contactName = contact
         prefs.contactPhone = phone
         _userName.value = user
-        _contactName.value = contact
         _contactPhone.value = phone
-        Log.d(TAG, "[DURGA] Saved contact info: User=$user, Contact=$contact, Phone=$phone")
-    }
-
-    /**
-     * Triggered by physical shake gesture or SOS button.
-     */
-    fun triggerEmergency() {
-        if (_emergencyState.value != EmergencyState.IDLE && _emergencyState.value != EmergencyState.CANCELLED) {
-            Log.d(TAG, "[DURGA] Emergency already active or verifying. Ignoring trigger.")
-            return
-        }
-
-        Log.d(TAG, "[DURGA] Gesture/Button detected. Starting 5s cancellation verification window.")
-        _emergencyState.value = EmergencyState.VERIFYING
-        _countdownSeconds.value = CANCEL_WINDOW_SECONDS
-
-        countdownTimer?.cancel()
-        countdownTimer = object : CountDownTimer((CANCEL_WINDOW_SECONDS * 1000).toLong(), 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsRemaining = (millisUntilFinished / 1000).toInt() + 1
-                _countdownSeconds.value = secondsRemaining
-            }
-
-            override fun onFinish() {
-                _countdownSeconds.value = 0
-                Log.d(TAG, "[DURGA] 5-second window expired without cancellation. Escalating emergency.")
-                executeEmergencyPipeline()
-            }
-        }.start()
-    }
-
-    /**
-     * User explicitly cancels the emergency within the 5-second safety window.
-     */
-    fun cancelEmergency() {
-        countdownTimer?.cancel()
-        countdownTimer = null
-        _emergencyState.value = EmergencyState.CANCELLED
-        Log.d(TAG, "[DURGA] Emergency CANCELLED by user. Confirmed safe.")
-
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(2000)
-            if (_emergencyState.value == EmergencyState.CANCELLED) {
-                _emergencyState.value = EmergencyState.IDLE
-            }
-        }
-    }
-
-    private fun executeEmergencyPipeline() {
-        viewModelScope.launch {
-            // ========================================================
-            // STEP 1: MICROPHONE RECORDING (Phase 7: Microphone)
-            // ========================================================
-            _emergencyState.value = EmergencyState.RECORDING
-            Log.d(TAG, "[DURGA] Phase 7: Microphone activated. Capturing 5-second distress sample...")
-            val audioFile: File? = audioRecorder.recordAudio(durationMillis = 5000L) { remaining ->
-                _recordingSecondsRemaining.value = remaining
-            }
-
-            // ========================================================
-            // STEP 2: AI AUDIO DISTRESS ANALYSIS (Phase 8: AI Analysis)
-            // ========================================================
-            _emergencyState.value = EmergencyState.ANALYZING
-            Log.d(TAG, "[DURGA] Phase 8: Analyzing acoustic features (RMS, Peak, ZCR, Vocal energy)...")
-            val distressResult = distressAnalyzer.analyzeAudioFile(audioFile ?: File(""))
-            _aiDistressInfo.value = "${distressResult.level} (${String.format("%.2f", distressResult.score)})"
-            Log.d(TAG, "[DURGA] Distress assessment complete: ${distressResult.classification}")
-
-            // ========================================================
-            // STEP 3: GPS LOCATION ACQUISITION (Phase 9: Location)
-            // ========================================================
-            _emergencyState.value = EmergencyState.LOCATION_ACQUIRING
-            val location: DurgaLocation? = locationProvider.getCurrentLocation()
-            val lat = location?.latitude ?: 18.5204
-            val lon = location?.longitude ?: 73.8567
-            _locationInfo.value = if (location != null) {
-                String.format("%.4f, %.4f (±%.1fm)", lat, lon, location.accuracy)
-            } else {
-                "Location acquired (Default / Cell)"
-            }
-            Log.d(TAG, "[DURGA] Location acquired: lat=$lat, lon=$lon")
-
-            // ========================================================
-            // STEP 4: NEAREST POLICE STATION LOOKUP (Phase 10: Police)
-            // ========================================================
-            val (nearestStation, distanceKm) = policeRepo.findNearestStation(lat, lon)
-            Log.d(TAG, "[DURGA] Nearest station: ${nearestStation?.name} at ${String.format("%.2f", distanceKm ?: 0.0)} km")
-
-            // ========================================================
-            // STEP 5: AUDIO UPLOAD TO CLOUD / STORAGE (Phase 12)
-            // ========================================================
-            val eventId = "DURGA-2026-" + UUID.randomUUID().toString().substring(0, 6).uppercase()
-            val audioReference = if (audioFile != null) {
-                firestoreRepo.uploadAudioFile(audioFile, eventId)
-            } else ""
-
-            // ========================================================
-            // STEP 6: CONSTRUCT & PUBLISH EMERGENCY EVENT (Phase 3 & 11)
-            // ========================================================
-            val emergencyEvent = EmergencyEvent(
-                eventId = eventId,
-                userId = "USER-001",
-                userName = _userName.value ?: "Citizen A",
-                timestamp = System.currentTimeMillis(),
-                latitude = lat,
-                longitude = lon,
-                locationAccuracy = location?.accuracy ?: 15.0f,
-                distressScore = distressResult.score,
-                distressClassification = distressResult.classification,
-                emergencyLevel = distressResult.level,
-                audioUrl = audioReference,
-                emergencyContactPhone = _contactPhone.value ?: "+91-9876543210",
-                nearestPoliceStationName = nearestStation?.name ?: "Central Station",
-                nearestPoliceStationDistanceKm = distanceKm ?: 2.5,
-                status = "ACTIVE"
-            )
-
-            // Publish to Firestore & local real-time stream
-            firestoreRepo.publishEmergencyEvent(emergencyEvent)
-
-            _activeEmergencyEvent.value = emergencyEvent
-            _emergencyState.value = EmergencyState.ACTIVE
-            Log.d(TAG, "[DURGA] Emergency event created: $eventId. Status: ACTIVE")
-        }
-    }
-
-    /**
-     * Responder status management: ACKNOWLEDGED, RESPONDING, RESOLVED
-     */
-    fun updateIncidentStatus(eventId: String, newStatus: String) {
-        viewModelScope.launch {
-            emergencyRepo.updateEventStatus(eventId, newStatus)
-            Log.d(TAG, "[DURGA] Updated incident $eventId status to $newStatus")
-            if (newStatus == "RESOLVED") {
-                _emergencyState.value = EmergencyState.RESOLVED
-                kotlinx.coroutines.delay(1500)
-                _emergencyState.value = EmergencyState.IDLE
-            }
-        }
-    }
-
-    fun resetToSafe() {
-        _emergencyState.value = EmergencyState.IDLE
-        _activeEmergencyEvent.value?.let { event ->
-            viewModelScope.launch {
-                emergencyRepo.resolveEmergency(event.eventId)
-            }
-        }
-        _locationInfo.value = "Standby"
-        _aiDistressInfo.value = "Model Standby"
-        Log.d(TAG, "[DURGA] Emergency resolved. System returned to IDLE.")
     }
 
     override fun onCleared() {
         super.onCleared()
-        countdownTimer?.cancel()
+        safetyTimer?.cancel()
+        locationStreamingJob?.cancel()
+        proximityMonitoringJob?.cancel()
+        directMesh.stop()
     }
 }

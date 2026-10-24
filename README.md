@@ -1,171 +1,142 @@
 # DURGA
 ### Dynamic Unified Response & Geo-Alert System
-*Semester 5 Mini Project — Autonomous AI & Emergency Response Engineering*
+*Autonomous AI & Emergency Response Engineering Platform*
 
 ---
 
-## 1. Project Overview
+## 1. Project Overview & Prototype Boundary
 
-**DURGA** is an AI-assisted emergency response Android platform designed primarily for women's personal safety and multi-hazard distress situations. Unlike conventional emergency apps that merely act as decorative speed dialers or SMS triggers, DURGA operates as an end-to-end coordinated emergency response engine:
+**DURGA** is an autonomous safety and emergency-response platform built for physical multi-device testing and academic defense. Unlike passive speed-dialers or unverified mock applications, DURGA operates as an end-to-end coordinated emergency response engine:
 
 $$\text{SENSE} \longrightarrow \text{VERIFY} \longrightarrow \text{RECORD} \longrightarrow \text{ASSESS} \longrightarrow \text{LOCATE} \longrightarrow \text{ALERT} \longrightarrow \text{RESPOND}$$
 
+> **Important System Boundary**: DURGA is an authorized prototype emergency response platform. It is not an official municipal or state police dispatch integration. Police proximity is computed using verified physical coordinates. No emergency service or authority is claimed notified without active, verified integration evidence.
+
 ---
 
-## 2. Core Technological Architecture
+## 2. Architectural Architecture
 
 ```text
-       VICTIM PHONE (ROLE: USER)
+       PROTECTED CITIZEN (PHONE A)
                  │
-  [1] SOS Button / 3-Shake Gesture
+   [1] Trigger: In-App SOS / 3-Shake Gesture / Persistent Lock-Screen Notification Action
                  │
-  [2] 5-Second Cancellation Window (Cancel -> Safe)
+   [2] 5-Second 16-bit PCM Audio Capture @ 16 kHz Mono
                  │
-  [3] Microphone Capture (16-bit PCM WAV @ 16 kHz)
+   [3] On-Device Acoustic Feature Extraction (RMS dBFS, Peak Amplitude, ZCR)
                  │
-  [4] AI Acoustic Feature Extraction (RMS, dBFS, Peak, ZCR)
-                 │
-  [5] GPS Acquisition (FusedLocationProviderClient)
-                 │
-  [6] Nearest Police Station Search (Haversine Geo-calc)
+   [4] Safety Verification Gate
+       - If Distress Uncertain: Display "Are you safe?" prompt (10s countdown)
+         * Confirmed Policy: Prompt timeout does NOT escalate solely due to timeout!
+       - If High Distress or User Taps "Need Help": Escalate to Central Backend
                  │
                  ▼
-  [7] Cloud Publication (Firestore & Firebase Storage)
+   [5] DURGA Central Backend Service (Node.js + SQLite3 on Port 3000)
+       - Authenticates JWT session & enforces RBAC
+       - Calculates Haversine distance to nearest verified police station
+       - Queries all registered devices within 1.0 km radius
+       - Dispatches High-Priority FCM push notifications to nearby citizens
                  │
-        ┌────────┴────────┐
-        ▼                 ▼
-EMERGENCY CONTACT      POLICE RESPONDER
- (Guardian Console)    (Incident Command)
-  - Live Alert Badge    - Station Banner
-  - Victim Telemetry    - Telemetry & GPS Route
-  - Deep-link Route     - Audio Playback
-  - Audio Playback      - Unit Dispatch & Resolve
+        ┌────────┴───────────────────────────┐
+        ▼                                    ▼
+NEARBY CITIZEN (PHONE B)            TACTICAL RESPONDER COMMAND PORTAL
+ - High-Priority Proximity Alert     - http://localhost:3000/portal
+ - Telemetry & Walking Directions    - Live Leaflet GIS Tactical Map (1 km Geofence)
+ - Direct Police (112) Deep-Link     - Protected 5-Second Audio Evidence Player
+                                     - Incident Lifecycle: [Acknowledge] -> [Resolve]
+                                     - Complete Immutable Audit Trail
 ```
 
-- **Operating System**: Android (minSdk 26, targetSdk 34, compileSdk 34)
-- **Language**: Kotlin 1.9.24 + Coroutines / Flow
-- **Design System**: Material 3 Dark Slate (`#0B1120`) & Alert Red (`#E11D48`)
-- **Location Engine**: Google Play Services `FusedLocationProviderClient` + High Accuracy Satellite fix
-- **Acoustic Engine**: Android `AudioRecord` (16-bit PCM, 16000 Hz Mono) + RIFF WAV Header Writer
-- **Acoustic AI Scoring**: `DurgaScoringDistressAnalyzer` computing RMS energy, dBFS, peak transients, and zero-crossing frequency
-- **Cloud Backend**: Google Firebase BoM 33.2.0 (`Firestore`, `Storage`, `Messaging`, `Auth`) + Resilient Local-First Fallback
-- **Push Alerts**: `DurgaFirebaseMessagingService` with Heads-Up High Priority notification channel
+---
+
+## 3. Core Subsystems
+
+### A. Native Android Application (`app/`)
+- **Target OS**: Android 10 (API 29) through Android 14 (API 34).
+- **Architecture**: Kotlin 1.9+, Clean Architecture (MVVM + Coroutines + StateFlow).
+- **Incident State Machine (`IncidentStateMachine.kt`)**: Explicit 12-state FSM enforcing non-negotiable safety rules:
+  - Safety prompt timeout returns safely to `IDLE` (no false alarms).
+  - PIN cancellation with 3-attempt brute-force throttling and PBKDF2 hashing.
+  - Repeat SOS locks ordinary cancellation and requires authorized responder resolution.
+- **Multilingual Support**: Complete localized string resources in **English** (`values/`), **Hindi** (`values-hi/`), and **Marathi** (`values-mr/`).
+- **Multi-Trigger Support**:
+  - In-App Hero SOS Button.
+  - In-App 3-Shake Gesture Listener (`ShakeDetector.kt`, >13 m/s²).
+  - Persistent Lock-Screen Action (`DurgaSafetyService.kt`, Android 14 compliant foreground service).
+- **Acoustic Intelligence (`AudioRecorder.kt`, `DistressAnalyzer.kt`)**: Captures 5s uncompressed PCM WAV and scores vocal distress features without transmitting raw audio prematurely.
+
+### B. Central Backend API (`backend/`)
+- **Runtime**: Node.js v24 + Express + SQLite3 (`durga.db`).
+- **Geospatial Engine (`geo_utils.js`)**: Haversine distance calculation and spatial filtering for registered devices within a **1.0 km radius**.
+- **Role-Based Access Control (`auth.js`)**: Server-enforced role permissions (`CITIZEN`, `RESPONDER`).
+- **Push Notifications (`notification_service.js`)**: Firebase Cloud Messaging (FCM HTTP v1) integration with truthful status reporting.
+- **Immutable Audit Trail (`database.js`)**: Logs all sensitive transitions and operations chronologically.
+
+### C. Tactical Responder Command Portal (`backend/public/`)
+- Accessible at `http://localhost:3000/portal`.
+- Real-time Server-Sent Events (SSE) telemetry feed.
+- Leaflet GIS map with victim marker, 1 km geofence circle, and curated Pune police stations.
+- Protected audio player streaming 5-second PCM audio evidence.
+- Authenticated resolution modal requiring mandatory audit notes.
 
 ---
 
-## 3. Real Multi-Role Architecture
+## 4. Test Verification & Acceptance Matrix
 
-A single installed application supports three distinct operational roles, switchable via the Role selector or Tab Bar:
-
-1. **USER (Protected Citizen)**:
-   - Live sensor monitoring (Accelerometer 3-shake gesture listener).
-   - Prominent pulsating SOS activation trigger.
-   - 5-second verification countdown overlay with explicit user cancellation.
-   - 5-second acoustic recording status indicator.
-   - Real-time GPS and AI telemetry feedback.
-   - Guardian contact configuration.
-
-2. **EMERGENCY CONTACT (Guardian Monitor)**:
-   - Real-time incoming distress badge (`ACTIVE`, `RESPONDING`, `RESOLVED`).
-   - Victim details, AI distress level, and calculated GPS accuracy.
-   - Nearest known police station distance.
-   - **`PLAY AUDIO`**: Listens directly to the recorded distress audio sample.
-   - **`MAP ROUTE`**: Deep-links into Google Maps navigation coordinates (`geo:lat,lon`).
-   - **`CALL USER`**: Launches the phone dialer (`tel:...`).
-
-3. **POLICE / RESPONDER (Incident Command Console)**:
-   - Connected station command banner.
-   - Incident queue with real-time status updates (`ACTIVE`, `ACKNOWLEDGED`, `RESPONDING`, `RESOLVED`).
-   - Victim coordinates with accuracy radius.
-   - **`PLAY AUDIO`**: Evaluates audio sample for acoustic threats.
-   - **`GPS ROUTE`**: Displays shortest emergency route to victim.
-   - **Lifecycle Transition Buttons**:
-     - `[ACK]` -> Sets status to `ACKNOWLEDGED`
-     - `[DISPATCH]` -> Dispatches unit, transitions incident to `RESPONDING`
-     - `[RESOLVE]` -> Resolves incident across all devices and returns system to protected standby.
-
----
-
-## 4. Physical Acoustic AI Scoring Model
-
-The `DurgaScoringDistressAnalyzer` operates on actual physical properties of the recorded audio:
-
-| Metric | Calculation | Physical Significance |
-| :--- | :--- | :--- |
-| **RMS Energy** | $\sqrt{\frac{1}{N}\sum x_i^2}$ | Average sound pressure and volume |
-| **dBFS** | $20 \log_{10}(\text{RMS} / 32767)$ | Decibels Full-Scale ($0 \text{ dBFS}$ max, $-96 \text{ dBFS}$ silence) |
-| **Peak Transient** | $\max \|x_i\|$ | Sudden loud screams, impacts, or panic spikes |
-| **Zero Crossing Rate (ZCR)** | $\frac{1}{N}\sum \|\text{sgn}(x_i) - \text{sgn}(x_{i-1})\|$ | High frequency vocal turbulence / shrieks |
-
-### Scoring Output:
-- **High Distress ($\ge 0.70$)**: High-intensity vocalization or screaming detected ($dBFS > -22 \text{ dBFS}$).
-- **Moderate Distress ($0.40 - 0.69$)**: Elevated speech or shouting detected ($dBFS > -34 \text{ dBFS}$).
-- **Low Distress ($< 0.40$)**: Low ambient room noise or whisper.
-
----
-
-## 5. Demonstration Script (Step-by-Step)
-
-To demonstrate DURGA across physical devices or on an emulator:
-
-1. **Launch App**: Open DURGA. Choose **USER** role.
-2. **Trigger Emergency**: Tap the **SOS** button or shake the phone deliberately 3 times.
-3. **Safety Window**: The 5-second countdown appears. Do not press cancel.
-4. **Audio Capture**: The system transitions to `RECORDING AUDIO DISTRESS` for 5 seconds. Speak or shout into the microphone.
-5. **AI & Geospatial Pipeline**: The app analyzes acoustic features, acquires GPS coordinates, calculates distance to nearest police station, and uploads event to Firestore.
-6. **Switch to CONTACT Role**: Tap `CONTACT` tab. Observe the live incident badge, victim name, coordinates, and tap **PLAY AUDIO** to listen to the recorded audio.
-7. **Switch to POLICE Role**: Tap `POLICE` tab. Observe the incident command console.
-8. **Dispatch**: Tap `[DISPATCH]`. Observe status transition to `RESPONDING` on both Responder and Contact screens.
-9. **Resolve**: Tap `[RESOLVE]`. The incident is closed, and the system resets cleanly to `PROTECTED — SENSORS ACTIVE`.
-
----
-
-## 6. Build and Test Verification
-
-### Running Unit Tests:
-```bash
-./gradlew testDebugUnitTest
+### Automated Unit Tests (`IncidentStateMachineTest.kt`)
+Run via `.\gradlew.bat testDebugUnitTest`:
+```text
+✓ testInitialStateIsIdle
+✓ testNormalTriggerToEscalationWhenDistressDetected
+✓ testUncertainDistressShowsAreYouSafeAndDoesNotEscalateOnTimeout
+✓ testInitialIncidentCancelledWithCorrectPin
+✓ testRepeatSosDisablesOrdinaryCancellationAndRequiresResponder
+✓ testPinThrottlingLocksAfterThreeIncorrectAttempts
+Status: 100% PASSED (6/6 tests)
 ```
-**Results**:
-- `GeoUtilsTest`: 3/3 passed (Haversine formula validation, coordinate shifts).
-- `DistressAnalyzerTest`: 3/3 passed (Empty file fallback, High-amplitude scream classification, Ambient noise classification).
-- `EmergencyRepositoryTest`: 3/3 passed (Event registration, deduplication, status transitions).
-- `EmergencyStateTest`: 2/2 passed (Complete 13-state emergency finite state machine).
 
-### Building and Installing APK:
-```bash
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+### Automated Backend Integration Tests (`backend/test/run_tests.js`)
+Run via `node test/run_tests.js`:
+```text
+✓ Citizen A OTP & JWT Authentication (HTTP 200)
+✓ 4-Digit Security PIN Saved with PBKDF2 Hash
+✓ Device A GPS Registered (Shivajinagar)
+✓ Citizen B Registered within 1.0 km Radius (377m away)
+✓ Incident Created & Nearest Police Station Calculated (HTTP 201)
+✓ Initial Incident Cancelled via Valid PIN
+✓ Repeat SOS Escalated (Status: REPEAT_ACTIVE)
+✓ PIN Cancellation Strictly Rejected on Repeat SOS (HTTP 403 Forbidden)
+✓ Authorized Responder Acknowledged & Resolved Incident
+✓ Location Streaming Blocked After Resolution (HTTP 403 Forbidden)
+✓ Complete Immutable Audit Trail Verified (5 chronological records)
+Status: 100% PASSED (12/12 tests)
 ```
-Output: `app/build/outputs/apk/debug/app-debug.apk` (11.0 MB)
 
 ---
 
-## 7. Security and Privacy
+## 5. Two-Phone Demonstration Protocol
 
-- **Firestore Rules** (`firestore.rules`): Validates schema, protects log deletion, enforces role permissions.
-- **Storage Rules** (`storage.rules`): Restricts uploads to audio MIME types under 5 MB.
-- **Privacy by Design**: Microphone is **never** recorded continuously in the background. It is activated exclusively after the 5-second verification window expires during an explicit emergency.
-
----
-
-## 8. Interactive Laptop Showcase & System Simulation
-
-For project evaluations, classroom defense, and viva demonstrations where physical phone projection might be inconvenient, a comprehensive **Laptop Demonstration Simulator** is included in the `simulation/` directory.
-
-### Quick Start (Single Click / Terminal):
+### Step 1: Start Backend & Launch Responder Portal
+Run the automated launcher script in PowerShell:
 ```powershell
-.\run_simulation.ps1
+.\run_demo.ps1
 ```
-*Or double-click `simulation/index.html` in any modern web browser.*
+Or start manually:
+```powershell
+cd backend
+npm start
+```
+Open your browser at `http://localhost:3000/portal` and log in with responder credentials:
+- **Phone**: `+919999999999`
+- **Test OTP**: `123456`
 
-### Showcase Features:
-- **Triple-Role Mesh**: Side-by-side interactive mockups of **Victim Smartphone (`USER`)**, **Trusted Contact Phone (`EMERGENCY_CONTACT`)**, and **Police Dispatch Terminal (`POLICE_RESPONDER`)**.
-- **Interactive Triggers**: 3-axis accelerometer shake canvas (>2.7G spike simulation) and pulsating SOS button.
-- **Verification Window**: 5-second SVG countdown with cancel/false-alarm button.
-- **Acoustic AI Engine**: Real-time 16-bit PCM waveform oscilloscope computing RMS, dBFS, and Zero-Crossing Rate.
-- **Audio Evidence Player**: Working in-browser player on the contact device to listen to ambient audio recordings.
-- **Tactical Map (Leaflet.js)**: Displays victim coordinates, all 5 Pune police stations, nearest station calculation via Haversine, and animated police cruiser movement along the vector route.
-- **Police CAD Controls**: Full interactive lifecycle buttons (`[ACKNOWLEDGE]`, `[DISPATCH PATROL]`, `[RESOLVE & ARCHIVE]`).
-- **Forensic AI Acoustic Lab**: Interactive modal to test and benchmark scream detection, elevated shouting, and ambient noise against mathematical formulas.
+### Step 2: Install APK on Android Devices
+```powershell
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
 
+### Step 3: Demonstration Scenarios
+1. **Scenario 1 (PIN Cancellation)**: Trigger SOS on Phone A → Enter PIN `1234` → Incident cancels cleanly.
+2. **Scenario 2 (1 km Proximity Dispatch)**: Trigger SOS on Phone A → Phone B (<1 km) receives proximity push notification → Responder portal beeps and displays victim on map.
+3. **Scenario 3 (Repeat SOS Lockdown)**: Tap `REPEAT SOS` on Phone A → Ordinary PIN cancellation button disappears permanently.
+4. **Scenario 4 (Responder Resolution)**: Dispatcher on portal listens to 5s audio evidence, clicks `Acknowledge`, then `Resolve Incident` with notes → Both Phone A and Phone B update instantly to `RESOLVED`.

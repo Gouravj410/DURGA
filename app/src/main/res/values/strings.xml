@@ -1,8 +1,69 @@
 <resources>
     <string name="app_name">DURGA</string>
     <string name="app_tagline">Dynamic Unified Response &amp; Geo-Alert System</string>
+    <string name="app_description">DURGA is an autonomous emergency-response platform providing on-device distress assessment, zero-delay incident dispatch, and verified responder coordination.</string>
+
+    <!-- Operational States -->
     <string name="status_protected">PROTECTED — SENSORS ACTIVE</string>
     <string name="status_emergency">EMERGENCY ACTIVE</string>
+    <string name="status_idle">STANDBY — READY</string>
+    <string name="status_triggered">TRIGGER DETECTED</string>
+    <string name="status_recording">RECORDING AUDIO SAMPLE (5s)</string>
+    <string name="status_analyzing">ANALYZING DISTRESS LOCALLY</string>
+    <string name="status_verifying">CONFIRMING SAFETY STATUS</string>
+    <string name="status_escalating">DISPATCHING EMERGENCY ALERT</string>
+    <string name="status_repeat_active">REPEAT SOS — ORDINARY CANCEL DISABLED</string>
+    <string name="status_acknowledged">ACKNOWLEDGED BY RESPONDER</string>
+    <string name="status_responding">RESPONDER EN ROUTE</string>
+    <string name="status_resolved">INCIDENT RESOLVED</string>
+    <string name="status_cancelled">INCIDENT CANCELLED</string>
+
+    <!-- Action Buttons -->
     <string name="emergency_btn_text">HOLD SOS</string>
-    <string name="emergency_cancel">CANCEL EMERGENCY</string>
+    <string name="emergency_cancel">CANCEL WITH PIN</string>
+    <string name="btn_repeat_sos">REPEAT SOS</string>
+    <string name="btn_safe_confirm">I AM SAFE</string>
+    <string name="btn_need_help">I NEED HELP</string>
+    <string name="btn_submit_pin">VERIFY PIN</string>
+    <string name="btn_call_helpline">CALL 112</string>
+    <string name="btn_view_map">OPEN NAVIGATION</string>
+
+    <!-- Prompts & Dialogs -->
+    <string name="prompt_are_you_safe">Are you safe?</string>
+    <string name="prompt_are_you_safe_sub">Acoustic analysis was uncertain. Confirm your safety or request assistance.</string>
+    <string name="prompt_enter_pin">Enter 4-Digit Security PIN</string>
+    <string name="prompt_pin_attempts_left">Attempts remaining: %1$d</string>
+    <string name="prompt_pin_locked">Too many incorrect attempts. Cancellation locked.</string>
+    <string name="prompt_pin_incorrect">Incorrect PIN entered.</string>
+    <string name="prompt_repeat_sos_warning">Repeat SOS will lock cancellation and require authorized responder resolution.</string>
+
+    <!-- Helplines -->
+    <string name="helpline_police_title">National Emergency / Police</string>
+    <string name="helpline_police_number">112</string>
+    <string name="helpline_women_title">Women Helpline</string>
+    <string name="helpline_women_number">1091</string>
+    <string name="helpline_ambulance_title">Ambulance</string>
+    <string name="helpline_ambulance_number">108</string>
+
+    <!-- Permissions and Status -->
+    <string name="perm_location_title">Location Service</string>
+    <string name="perm_location_desc">Required to route responders and alert citizens within 1 km.</string>
+    <string name="perm_audio_title">Microphone Access</string>
+    <string name="perm_audio_desc">Required for 5-second acoustic distress inference during SOS.</string>
+    <string name="perm_notification_title">Push Notifications</string>
+    <string name="perm_notification_desc">Required to receive immediate alerts regarding nearby emergencies.</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_name">DURGA Emergency Alerts</string>
+    <string name="notif_channel_desc">High-priority alerts for life-safety incidents within 1 km.</string>
+    <string name="notif_service_title">DURGA Safety Monitor Active</string>
+    <string name="notif_service_action_sos">🔴 TAP FOR SOS</string>
+    <string name="notif_alert_title">🚨 DURGA EMERGENCY ALERT</string>
+    <string name="notif_alert_body">Citizen distress detected %1$s away. Tap to view location.</string>
+
+    <!-- Error States -->
+    <string name="err_no_location">Unable to acquire GPS fix. Retrying...</string>
+    <string name="err_audio_failed">Audio capture failed. Escalating alert directly.</string>
+    <string name="err_network_offline">Working in offline mode. Events queued locally.</string>
+    <string name="err_unauthorized">Operation not authorized.</string>
 </resources>

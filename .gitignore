@@ -17,3 +17,22 @@ local.properties
 *.apk
 *.aab
 ui_*.xml
+
+# Node & Backend
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database & Runtime Uploads
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/uploads/
+**/uploads/
+
+# Environment configs
+.env
+.env.local

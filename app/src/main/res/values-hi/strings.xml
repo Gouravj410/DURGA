@@ -1,0 +1,69 @@
+<resources>
+    <string name="app_name">दुर्गा (DURGA)</string>
+    <string name="app_tagline">डायनामिक यूनिफाइड रिस्पांस एवं भू-चेतावनी प्रणाली</string>
+    <string name="app_description">दुर्गा एक स्वायत्त आपातकालीन प्रतिक्रिया मंच है जो ऑन-डिवाइस संकट मूल्यांकन, शून्य-विलंब घटना प्रेषण और सत्यापित उत्तरदाता समन्वय प्रदान करता है।</string>
+
+    <!-- Operational States -->
+    <string name="status_protected">सुरक्षित — सेंसर सक्रिय</string>
+    <string name="status_emergency">आपातकाल सक्रिय</string>
+    <string name="status_idle">स्टैंडबाय — तैयार</string>
+    <string name="status_triggered">ट्रिगर का पता चला</string>
+    <string name="status_recording">ध्वनि रिकॉर्डिंग जारी (5 सेकंड)</string>
+    <string name="status_analyzing">स्थानीय संकट विश्लेषण जारी</string>
+    <string name="status_verifying">सुरक्षा स्थिति की पुष्टि की जा रही है</string>
+    <string name="status_escalating">आपातकालीन अलर्ट भेजा जा रहा है</string>
+    <string name="status_repeat_active">पुनरावृत्ति SOS — सामान्य रद्दीकरण अक्षम</string>
+    <string name="status_acknowledged">उत्तरदाता द्वारा स्वीकार किया गया</string>
+    <string name="status_responding">सहायता दल रास्ते में है</string>
+    <string name="status_resolved">घटना का समाधान हो गया</string>
+    <string name="status_cancelled">घटना रद्द कर दी गई</string>
+
+    <!-- Action Buttons -->
+    <string name="emergency_btn_text">SOS दबाए रखें</string>
+    <string name="emergency_cancel">पिन के साथ रद्द करें</string>
+    <string name="btn_repeat_sos">पुनः SOS दबाएं</string>
+    <string name="btn_safe_confirm">मैं सुरक्षित हूँ</string>
+    <string name="btn_need_help">मुझे मदद चाहिए</string>
+    <string name="btn_submit_pin">पिन सत्यापित करें</string>
+    <string name="btn_call_helpline">112 पर कॉल करें</string>
+    <string name="btn_view_map">नेविगेशन खोलें</string>
+
+    <!-- Prompts & Dialogs -->
+    <string name="prompt_are_you_safe">क्या आप सुरक्षित हैं?</string>
+    <string name="prompt_are_you_safe_sub">ध्वनि विश्लेषण अनिश्चित था। अपनी सुरक्षा की पुष्टि करें या सहायता का अनुरोध करें।</string>
+    <string name="prompt_enter_pin">4-अंकों का सुरक्षा पिन दर्ज करें</string>
+    <string name="prompt_pin_attempts_left">शेष प्रयास: %1$d</string>
+    <string name="prompt_pin_locked">अत्यधिक गलत प्रयास। रद्दीकरण अवरुद्ध।</string>
+    <string name="prompt_pin_incorrect">गलत पिन दर्ज किया गया।</string>
+    <string name="prompt_repeat_sos_warning">पुनरावृत्ति SOS रद्दीकरण को लॉक कर देगा और केवल अधिकृत उत्तरदाता ही इसे हल कर सकते हैं।</string>
+
+    <!-- Helplines -->
+    <string name="helpline_police_title">राष्ट्रीय आपातकालीन सेवा / पुलिस</string>
+    <string name="helpline_police_number">112</string>
+    <string name="helpline_women_title">महिला हेल्पलाइन</string>
+    <string name="helpline_women_number">1091</string>
+    <string name="helpline_ambulance_title">एम्बुलेंस</string>
+    <string name="helpline_ambulance_number">108</string>
+
+    <!-- Permissions and Status -->
+    <string name="perm_location_title">स्थान सेवा (GPS)</string>
+    <string name="perm_location_desc">उत्तरदाताओं को निर्देशित करने और 1 किमी के भीतर नागरिकों को सचेत करने के लिए आवश्यक।</string>
+    <string name="perm_audio_title">माइक्रोफ़ोन पहुंच</string>
+    <string name="perm_audio_desc">SOS के दौरान 5 सेकंड के ध्वनिक संकट मूल्यांकन के लिए आवश्यक।</string>
+    <string name="perm_notification_title">पुश सूचनाएं</string>
+    <string name="perm_notification_desc">आस-पास की आपात स्थितियों के तत्काल अलर्ट प्राप्त करने के लिए आवश्यक।</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_name">दुर्गा आपातकालीन अलर्ट</string>
+    <string name="notif_channel_desc">1 किमी के भीतर जीवन-सुरक्षा घटनाओं के लिए उच्च-प्राथमिकता अलर्ट।</string>
+    <string name="notif_service_title">दुर्गा सुरक्षा मॉनिटर सक्रिय</string>
+    <string name="notif_service_action_sos">🔴 SOS के लिए टैप करें</string>
+    <string name="notif_alert_title">🚨 दुर्गा आपातकालीन अलर्ट</string>
+    <string name="notif_alert_body">%1$s दूर नागरिक संकट का पता चला। स्थान देखने के लिए टैप करें।</string>
+
+    <!-- Error States -->
+    <string name="err_no_location">GPS स्थान प्राप्त करने में असमर्थ। पुनः प्रयास जारी...</string>
+    <string name="err_audio_failed">ऑडियो रिकॉर्डिंग विफल। अलर्ट सीधे भेजा जा रहा है।</string>
+    <string name="err_network_offline">ऑफ़लाइन मोड में कार्य कर रहे हैं। घटनाएं स्थानीय रूप से सुरक्षित हैं।</string>
+    <string name="err_unauthorized">ऑपरेशन अनधिकृत है।</string>
+</resources>

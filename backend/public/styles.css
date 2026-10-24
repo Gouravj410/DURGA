@@ -1,0 +1,483 @@
+/* DURGA Responder Command Portal — Minimalist Red-and-Black Tactical Design System */
+
+:root {
+  --bg-primary: #030712;
+  --bg-surface: #0b1120;
+  --bg-card: #111827;
+  --bg-card-hover: #1f2937;
+  --border-subtle: #1f2937;
+  --border-focus: #374151;
+
+  --red-primary: #dc2626;
+  --red-hover: #b91c1c;
+  --red-dim: rgba(220, 38, 38, 0.15);
+  --red-border: rgba(220, 38, 38, 0.4);
+
+  --amber-primary: #d97706;
+  --amber-dim: rgba(217, 119, 6, 0.15);
+  --green-primary: #059669;
+  --green-dim: rgba(5, 150, 105, 0.15);
+
+  --text-main: #f9fafb;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-size: 14px;
+  overflow-x: hidden;
+}
+
+/* Header */
+.portal-header {
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-badge {
+  background: var(--red-primary);
+  color: #fff;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+
+.brand-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.header-status-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.system-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green-primary);
+}
+.status-dot.active {
+  background: var(--red-primary);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.prototype-notice-bar {
+  background: #172554;
+  color: #93c5fd;
+  border-bottom: 1px solid #1e3a8a;
+  padding: 6px 24px;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Layout Container */
+.portal-container {
+  display: grid;
+  grid-template-columns: 380px 1fr 340px;
+  height: calc(100vh - 85px);
+  overflow: hidden;
+}
+
+/* Left Column: Incidents Queue */
+.incidents-panel {
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.incidents-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.incident-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.incident-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-focus);
+}
+
+.incident-card.active {
+  border-color: var(--red-primary);
+  background: rgba(220, 38, 38, 0.04);
+}
+
+.incident-card.repeat-active {
+  border-color: #ef4444;
+  border-left: 4px solid #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.incident-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.incident-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-badge.ACTIVE {
+  background: var(--red-dim);
+  color: #f87171;
+  border: 1px solid var(--red-border);
+}
+
+.status-badge.REPEAT_ACTIVE {
+  background: #7f1d1d;
+  color: #fca5a5;
+  border: 1px solid #ef4444;
+  font-weight: 800;
+}
+
+.status-badge.ACKNOWLEDGED {
+  background: var(--amber-dim);
+  color: #fbbf24;
+  border: 1px solid rgba(217, 119, 6, 0.4);
+}
+
+.status-badge.RESOLVED {
+  background: var(--green-dim);
+  color: #34d399;
+  border: 1px solid rgba(5, 150, 105, 0.4);
+}
+
+.status-badge.CANCELLED {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.incident-card-body {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.incident-meta-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Center Column: Map & Active Incident Focus */
+.center-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+#map-container {
+  flex: 1;
+  min-height: 400px;
+  background: #1e293b;
+}
+
+.incident-action-bar {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.action-bar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.action-bar-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.action-bar-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.action-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--border-focus);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--red-primary);
+  border-color: var(--red-primary);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--red-hover);
+  border-color: var(--red-hover);
+}
+
+.btn-green {
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+  color: #fff;
+}
+
+/* Right Column: Audio & Telemetry Details */
+.telemetry-panel {
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.telemetry-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.telemetry-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.telemetry-item {
+  background: var(--bg-card);
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.telemetry-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.telemetry-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  color: var(--text-main);
+}
+
+/* Audio Player */
+.audio-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* Audit Logs Table */
+.audit-log-container {
+  max-height: 250px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.audit-entry {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.audit-time {
+  color: var(--text-dim);
+}
+
+.audit-action {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.audit-details {
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* Modal for Resolution Notes */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal-content {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-focus);
+  border-radius: 6px;
+  width: 480px;
+  padding: 24px;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.modal-textarea {
+  width: 100%;
+  height: 100px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  margin-bottom: 16px;
+  resize: vertical;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
