@@ -179,9 +179,28 @@ function playAlertTone() {
 // ==============================================================================
 
 async function fetchActiveIncidents() {
+  if (!authToken) {
+    incidentsListEl.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: var(--text-dim);">
+        Responder authentication required to view active incidents queue.
+      </div>
+    `;
+    activeCountEl.textContent = "0";
+    return;
+  }
+
   try {
-    const res = await fetch("/api/v1/incidents/active");
-    if (!res.ok) return;
+    const res = await fetch("/api/v1/incidents/active", {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        handleLogout();
+      }
+      return;
+    }
     const incidents = await res.json();
     activeIncidents = incidents;
     renderIncidentsQueue(incidents);
@@ -323,14 +342,21 @@ function updateVictimMarker(lat, lon, accuracy) {
 }
 
 async function loadIncidentAudio(incidentId) {
-  const audioUrl = `/api/v1/incidents/${incidentId}/audio`;
+  const audioUrl = authToken
+    ? `/api/v1/incidents/${incidentId}/audio?token=${encodeURIComponent(authToken)}`
+    : `/api/v1/incidents/${incidentId}/audio`;
   audioPlayer.src = audioUrl;
   audioStatusLabel.textContent = `Streaming protected audio from incident: ${incidentId}`;
 }
 
 async function loadAuditLogs(incidentId) {
+  if (!authToken) return;
   try {
-    const res = await fetch(`/api/v1/incidents/${incidentId}`);
+    const res = await fetch(`/api/v1/incidents/${incidentId}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
     if (!res.ok) return;
     const data = await res.json();
 
@@ -475,6 +501,13 @@ async function handleLogin() {
   btnSubmitLogin.disabled = true;
 
   try {
+    // Request OTP first if needed
+    await fetch("/api/v1/auth/request-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    });
+
     const res = await fetch("/api/v1/auth/verify-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

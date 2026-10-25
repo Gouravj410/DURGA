@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -15,6 +17,11 @@ import androidx.core.app.NotificationCompat
 import com.durga.emergency.R
 import com.durga.emergency.data.PreferencesManager
 import com.durga.emergency.data.api.DurgaApiClient
+import com.durga.emergency.location.FusedLocationProvider
+import com.durga.emergency.location.LocationProvider
+import com.durga.emergency.sensors.CustomGestureDetector
+import com.durga.emergency.sensors.GestureRepository
+import com.durga.emergency.sensors.GestureType
 import com.durga.emergency.ui.main.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +34,7 @@ import kotlinx.coroutines.launch
  * DURGA Persistent Background Safety Service.
  * Provides a dependable Lock-Screen & Background SOS Action Trigger
  * that bypasses Android 10-14 background execution limits.
- * Also provides continuous background proximity alerting for adjacent phones.
+ * Also provides continuous background proximity alerting and motion gesture detection.
  */
 class DurgaSafetyService : Service() {
 
@@ -64,32 +71,47 @@ class DurgaSafetyService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var prefs: PreferencesManager
     private lateinit var apiClient: DurgaApiClient
-    private lateinit var directMesh: com.durga.emergency.mesh.DirectMeshManager
+    private lateinit var locationProvider: LocationProvider
+
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
+    private var gestureDetector: CustomGestureDetector? = null
+    private lateinit var gestureRepo: GestureRepository
 
     override fun onCreate() {
         super.onCreate()
         prefs = PreferencesManager(this)
         apiClient = DurgaApiClient.getInstance(this)
-        directMesh = com.durga.emergency.mesh.DirectMeshManager.getInstance(this)
+        locationProvider = FusedLocationProvider(this)
 
         createNotificationChannels()
         startBackgroundProximityMonitor()
-        startBackgroundDirectMeshListener()
+        initGestureMonitoring()
     }
 
-    private fun startBackgroundDirectMeshListener() {
-        directMesh.startListening(
-            myUserId = prefs.userId,
-            onAlert = { event ->
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                val alertNotif = buildProximityAlertNotification(event.userName, event.emergencyContactPhone)
-                notificationManager.notify(ALERT_NOTIFICATION_ID, alertNotif)
-            },
-            onCancel = {
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(ALERT_NOTIFICATION_ID)
+    private fun initGestureMonitoring() {
+        gestureRepo = GestureRepository.getInstance(this)
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        val primary = gestureRepo.getPrimaryGesture()
+        gestureDetector = CustomGestureDetector(
+            config = primary,
+            onGestureMatched = { matchedConfig, confidence ->
+                Log.i(TAG, "🚨 [BACKGROUND GESTURE DETECTED] Triggering SOS: ${matchedConfig.name}")
+                val sosIntent = Intent(this, MainActivity::class.java).apply {
+                    action = ACTION_TRIGGER_SOS
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                startActivity(sosIntent)
             }
         )
+
+        if (gestureRepo.isGestureActivationEnabled && primary.type == GestureType.MOTION_SHAKE_SEQUENCE) {
+            accelerometer?.let {
+                sensorManager?.registerListener(gestureDetector, it, SensorManager.SENSOR_DELAY_UI)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,9 +146,10 @@ class DurgaSafetyService : Service() {
             while (true) {
                 try {
                     if (prefs.isLoggedIn) {
+                        val loc = locationProvider.getCurrentLocation()
                         val result = apiClient.getNearbyIncidents(
-                            latitude = 18.5204,
-                            longitude = 73.8567,
+                            latitude = loc?.latitude,
+                            longitude = loc?.longitude,
                             radiusKm = 1.0,
                             excludeUserId = prefs.userId
                         )
@@ -251,6 +274,7 @@ class DurgaSafetyService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+        sensorManager?.unregisterListener(gestureDetector)
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(ALERT_NOTIFICATION_ID)
     }

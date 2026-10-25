@@ -55,15 +55,6 @@
                 android:letterSpacing="0.08"
                 android:layout_marginTop="16dp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🛡️ 100% Autonomous Device Mode: Direct Phone-to-Phone Mesh"
-                android:textColor="@color/durga_green_safe"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
-
             <!-- Login / Registration Form Card -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
@@ -212,7 +203,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="OPTIONAL: LAPTOP RESPONDER PORTAL SYNC"
+                        android:text="CENTRAL BACKEND API SERVER"
                         android:textColor="@color/durga_blue_accent"
                         android:textSize="11sp"
                         android:textStyle="bold"
@@ -221,7 +212,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="The app works 100% standalone via Direct Mesh. This is only needed to test the laptop web map:"
+                        android:text="Central cloud endpoint for 1.0 km proximity dispatch and identity verification:"
                         android:textColor="@color/text_secondary"
                         android:textSize="11sp"
                         android:layout_marginTop="2dp" />
@@ -230,14 +221,13 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:hint="Laptop Backend API URL (Optional)"
+                        android:hint="Central Cloud API URL (4G/5G/Internet)"
                         app:boxStrokeColor="@color/durga_blue_accent">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etServerUrl"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="http://10.203.117.118:3000/api/v1"
                             android:inputType="textUri"
                             android:textColor="@color/text_primary"
                             android:textSize="13sp" />

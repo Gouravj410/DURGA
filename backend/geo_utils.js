@@ -59,16 +59,35 @@ function findNearestPoliceStation(lat, lon, stations) {
 
 /**
  * Filters registered devices that are within the specified radius (in km) from incident coordinates.
+ * Enforces location recency (maxAgeMs, default 24h) and accuracy quality (< 1000m).
  * Excludes the victim's own device.
  */
-function filterDevicesWithinRadius(incidentLat, incidentLon, devices, radiusKm = 1.0, excludeUserId = null) {
+function filterDevicesWithinRadius(
+  incidentLat,
+  incidentLon,
+  devices,
+  radiusKm = 1.0,
+  excludeUserId = null,
+  maxLocationAgeMs = 24 * 60 * 60 * 1000
+) {
   const eligibleDevices = [];
+  const now = Date.now();
 
   for (const dev of devices) {
     if (excludeUserId && dev.user_id === excludeUserId) {
       continue;
     }
     if (dev.last_lat === null || dev.last_lon === null) {
+      continue;
+    }
+
+    // Filter stale locations older than maxLocationAgeMs
+    if (dev.last_location_time && now - dev.last_location_time > maxLocationAgeMs) {
+      continue;
+    }
+
+    // Filter extremely inaccurate locations (> 1000 meters)
+    if (dev.last_accuracy && dev.last_accuracy > 1000) {
       continue;
     }
 

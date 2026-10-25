@@ -92,7 +92,7 @@ class IncidentStateMachineTest {
     }
 
     @Test
-    fun testRepeatSosDisablesOrdinaryCancellationAndRequiresResponder() {
+    fun testRepeatSosPreservesUnifiedSecretCodeCancellationPolicy() {
         // Drive to ACTIVE state
         stateMachine.processEvent(IncidentEvent.TriggerSos(TriggerSource.MANUAL_SOS_BUTTON))
         stateMachine.processEvent(IncidentEvent.AudioRecordCompleted(null))
@@ -100,23 +100,17 @@ class IncidentStateMachineTest {
         stateMachine.processEvent(IncidentEvent.IncidentEscalated("INC-1003"))
         assertEquals(IncidentState.ACTIVE, stateMachine.currentState)
 
-        // User hits Repeat SOS
+        // User triggers Repeat SOS
         val repeatTriggered = stateMachine.processEvent(IncidentEvent.RepeatSosTriggered)
         assertTrue(repeatTriggered)
         assertEquals(IncidentState.REPEAT_ACTIVE, stateMachine.currentState)
 
-        // Verification: Ordinary PIN cancellation is strictly disabled!
+        // Unified Cancellation Policy: Secret-code PIN cancellation remains strictly permitted!
+        assertTrue(stateMachine.isPinCancellationPermitted())
+        val pinSuccess = stateMachine.recordPinAttempt(isCorrect = true)
+        assertTrue(pinSuccess)
+        assertEquals(IncidentState.CANCELLED, stateMachine.currentState)
         assertFalse(stateMachine.isPinCancellationPermitted())
-        val pinAttempt = stateMachine.recordPinAttempt(isCorrect = true)
-        assertFalse(pinAttempt)
-        assertEquals(IncidentState.REPEAT_ACTIVE, stateMachine.currentState)
-
-        // Only an authorized responder can resolve
-        val responderResolved = stateMachine.processEvent(
-            IncidentEvent.ResponderResolved("RESP-999", "On-site verification complete. Citizen safe.")
-        )
-        assertTrue(responderResolved)
-        assertEquals(IncidentState.RESOLVED, stateMachine.currentState)
     }
 
     @Test

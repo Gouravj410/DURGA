@@ -195,30 +195,13 @@ class IncidentStateMachine(
                 else -> null
             }
 
-            IncidentState.ACTIVE -> when (event) {
+            IncidentState.ACTIVE, IncidentState.REPEAT_ACTIVE -> when (event) {
                 is IncidentEvent.RepeatSosTriggered -> {
-                    Log.w(TAG, "Repeat SOS triggered during ACTIVE incident. Locking ordinary cancellation.")
+                    Log.i(TAG, "Repeat SOS triggered during active incident. Priority re-notified; secret-code cancellation remains permitted.")
                     IncidentState.REPEAT_ACTIVE
                 }
                 is IncidentEvent.PinCancellationSucceeded -> {
                     IncidentState.CANCELLED
-                }
-                is IncidentEvent.ResponderAcknowledged -> {
-                    IncidentState.ACKNOWLEDGED
-                }
-                is IncidentEvent.ResponderDispatched -> {
-                    IncidentState.RESPONDING
-                }
-                is IncidentEvent.ResponderResolved -> {
-                    IncidentState.RESOLVED
-                }
-                else -> null
-            }
-
-            IncidentState.REPEAT_ACTIVE -> when (event) {
-                is IncidentEvent.PinCancellationRequested -> {
-                    Log.w(TAG, "PIN cancellation REJECTED: Incident is in REPEAT_ACTIVE lockdown. Only an authorized responder can resolve.")
-                    null // Strictly blocked!
                 }
                 is IncidentEvent.ResponderAcknowledged -> {
                     IncidentState.ACKNOWLEDGED
@@ -285,7 +268,7 @@ class IncidentStateMachine(
      * Check if ordinary user PIN cancellation is currently permitted.
      */
     fun isPinCancellationPermitted(): Boolean {
-        return currentState == IncidentState.ACTIVE && !isPinLocked
+        return (currentState == IncidentState.ACTIVE || currentState == IncidentState.REPEAT_ACTIVE) && !isPinLocked
     }
 
     /**

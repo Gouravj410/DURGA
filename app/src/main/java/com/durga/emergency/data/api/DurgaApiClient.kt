@@ -40,6 +40,14 @@ data class IncidentStatusResponse(
     val message: String
 )
 
+data class TestNotificationResponse(
+    val success: Boolean,
+    val status: String,
+    val messageId: String?,
+    val recipientUserId: String?,
+    val note: String?
+)
+
 /**
  * Production-minded REST API Client connecting native Android app
  * to the central DURGA emergency response backend.
@@ -48,8 +56,7 @@ class DurgaApiClient(private val context: Context) {
 
     companion object {
         private const val TAG = "DURGA_API_CLIENT"
-        // Default addresses: 10.0.2.2 for emulator, 10.203.117.118 for physical Wi-Fi testing
-        private const val DEFAULT_BASE_URL = "http://10.203.117.118:3000/api/v1"
+        private val DEFAULT_BASE_URL = PreferencesManager.DEFAULT_SERVER_URL
         private const val EMULATOR_BASE_URL = "http://10.0.2.2:3000/api/v1"
 
         @Volatile
@@ -191,6 +198,7 @@ class DurgaApiClient(private val context: Context) {
 
     suspend fun registerDevice(
         fcmToken: String?,
+        deviceId: String = prefs.deviceId,
         deviceModel: String = Build.MODEL,
         latitude: Double?,
         longitude: Double?,
@@ -198,6 +206,7 @@ class DurgaApiClient(private val context: Context) {
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val payload = JsonObject().apply {
+                addProperty("deviceId", deviceId)
                 addProperty("fcmToken", fcmToken)
                 addProperty("deviceModel", deviceModel)
                 if (latitude != null) addProperty("latitude", latitude)
@@ -208,6 +217,48 @@ class DurgaApiClient(private val context: Context) {
             Result.success(true)
         } catch (e: Exception) {
             Log.e(TAG, "registerDevice error", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun revokeDeviceToken(
+        deviceId: String? = null,
+        fcmToken: String? = null
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                if (!deviceId.isNullOrEmpty()) addProperty("deviceId", deviceId)
+                if (!fcmToken.isNullOrEmpty()) addProperty("fcmToken", fcmToken)
+            }
+            executePost("$baseUrl/devices/revoke-token", payload.toString(), authToken)
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "revokeDeviceToken error", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendTestNotification(
+        targetUserId: String? = null,
+        targetPhone: String? = null
+    ): Result<TestNotificationResponse> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                if (!targetUserId.isNullOrEmpty()) addProperty("targetUserId", targetUserId)
+                if (!targetPhone.isNullOrEmpty()) addProperty("targetPhone", targetPhone)
+            }
+            val response = executePost("$baseUrl/notifications/test", payload.toString(), authToken)
+            val json = gson.fromJson(response, JsonObject::class.java)
+            val res = TestNotificationResponse(
+                success = json.get("success")?.asBoolean ?: false,
+                status = json.get("status")?.asString ?: "UNKNOWN",
+                messageId = if (json.has("messageId") && !json.get("messageId").isJsonNull) json.get("messageId").asString else null,
+                recipientUserId = if (json.has("recipientUserId") && !json.get("recipientUserId").isJsonNull) json.get("recipientUserId").asString else null,
+                note = if (json.has("note") && !json.get("note").isJsonNull) json.get("note").asString else null
+            )
+            Result.success(res)
+        } catch (e: Exception) {
+            Log.e(TAG, "sendTestNotification error", e)
             Result.failure(e)
         }
     }
@@ -352,8 +403,10 @@ class DurgaApiClient(private val context: Context) {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json; utf-8")
             setRequestProperty("Accept", "application/json")
-            connectTimeout = 8000
-            readTimeout = 8000
+            setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
+            setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            connectTimeout = 12000
+            readTimeout = 12000
             if (token != null) {
                 setRequestProperty("Authorization", "Bearer $token")
             }
@@ -378,9 +431,6 @@ class DurgaApiClient(private val context: Context) {
     private fun executePatch(urlString: String, jsonBody: String, token: String?): String {
         val url = URL(urlString)
         val conn = (url.openConnection() as HttpURLConnection).apply {
-            // Note: Some HttpURLConnection implementations do not support PATCH directly,
-            // so we set X-HTTP-Method-Override or use requestMethod with custom reflection if needed,
-            // or use POST if server supports, but HttpURLConnection on Android accepts PATCH directly.
             try {
                 requestMethod = "PATCH"
             } catch (e: Exception) {
@@ -389,8 +439,10 @@ class DurgaApiClient(private val context: Context) {
             }
             setRequestProperty("Content-Type", "application/json; utf-8")
             setRequestProperty("Accept", "application/json")
-            connectTimeout = 8000
-            readTimeout = 8000
+            setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
+            setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            connectTimeout = 12000
+            readTimeout = 12000
             if (token != null) {
                 setRequestProperty("Authorization", "Bearer $token")
             }
@@ -417,8 +469,10 @@ class DurgaApiClient(private val context: Context) {
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             setRequestProperty("Accept", "application/json")
-            connectTimeout = 8000
-            readTimeout = 8000
+            setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
+            setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            connectTimeout = 12000
+            readTimeout = 12000
             if (token != null) {
                 setRequestProperty("Authorization", "Bearer $token")
             }

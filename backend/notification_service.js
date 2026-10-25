@@ -6,28 +6,49 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 let fcmInitialized = false;
 let admin = null;
 
-// Look for Firebase Service Account Key
+// Look for Firebase Service Account Key (via env var path, raw JSON, or local file)
 const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(__dirname, "serviceAccountKey.json");
 
 try {
-  if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+  let serviceAccount = null;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    } catch (e) {
+      console.error("[DURGA NOTIFICATIONS] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
+    }
+  } else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+    try {
+      serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, "utf8"));
+    } catch (e) {
+      console.error("[DURGA NOTIFICATIONS] Failed to read serviceAccountKey.json:", e.message);
+    }
+  }
+
+  if (serviceAccount) {
     admin = require("firebase-admin");
-    const serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, "utf8"));
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
     fcmInitialized = true;
     console.log("[DURGA NOTIFICATIONS] Firebase Admin SDK initialized successfully with service account.");
   } else {
+    if (process.env.DURGA_REQUIRE_FCM === "true") {
+      throw new Error("Production Configuration Error: FCM service account credentials are required.");
+    }
     console.log(
-      "[DURGA NOTIFICATIONS] No serviceAccountKey.json found. Operating in verified development audit mode."
+      "[DURGA NOTIFICATIONS] No service account key found. Operating in verified development audit mode."
     );
   }
 } catch (e) {
+  if (process.env.DURGA_REQUIRE_FCM === "true") {
+    throw e;
+  }
   console.warn("[DURGA NOTIFICATIONS] Firebase initialization warning:", e.message);
 }
 
@@ -129,7 +150,108 @@ async function dispatchProximityPushNotifications(targetDevices, incident) {
   };
 }
 
+/**
+ * Sends an authenticated test notification to a specific target device.
+ *
+ * @param {Object} senderUser - Authenticated sender profile from JWT
+ * @param {Object} targetDevice - Target device record with fcm_token
+ * @param {string} customTitle
+ * @param {string} customBody
+ * @param {Function} onInvalidTokenCallback - Callback to deactivate dead tokens
+ */
+async function sendTestPushNotification(senderUser, targetDevice, customTitle, customBody, onInvalidTokenCallback = null) {
+  const eventId = "TEST-" + crypto.randomUUID().substring(0, 8).toUpperCase();
+  const title = customTitle || "DURGA Test Notification";
+  const body = customBody || `Internet notification test received from ${senderUser.name || "Authorized Citizen"}.`;
+
+  const payload = {
+    type: "DURGA_TEST",
+    eventId,
+    title,
+    body,
+    senderId: String(senderUser.userId || senderUser.id || "UNKNOWN"),
+    createdAt: String(Date.now()),
+    schemaVersion: "1.0",
+  };
+
+  if (fcmInitialized && admin && targetDevice.fcm_token) {
+    try {
+      const message = {
+        token: targetDevice.fcm_token,
+        notification: {
+          title,
+          body,
+        },
+        data: payload,
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "durga_emergency_alerts",
+            priority: "max",
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
+        },
+      };
+
+      const messageId = await admin.messaging().send(message);
+      console.log(`[DURGA FCM TEST] Test push submitted to FCM: ${messageId} (Recipient: ${targetDevice.user_id})`);
+      return {
+        success: true,
+        status: "FCM_SUBMISSION_ACCEPTED",
+        messageId,
+        recipientUserId: targetDevice.user_id,
+        eventId,
+      };
+    } catch (err) {
+      console.error(`[DURGA FCM TEST] Error sending to token ${targetDevice.fcm_token.substring(0, 10)}:`, err.message);
+
+      // Check for permanently dead tokens
+      if (
+        err.code === "messaging/invalid-registration-token" ||
+        err.code === "messaging/registration-token-not-registered"
+      ) {
+        if (onInvalidTokenCallback) {
+          try {
+            await onInvalidTokenCallback(targetDevice.fcm_token);
+          } catch (cleanErr) {
+            console.error("[DURGA FCM TEST] Error running token cleanup:", cleanErr.message);
+          }
+        }
+        return {
+          success: false,
+          status: "TOKEN_UNREGISTERED_OR_INVALID",
+          error: "Recipient token is expired or unregistered.",
+          recipientUserId: targetDevice.user_id,
+          eventId,
+        };
+      }
+
+      return {
+        success: false,
+        status: "FCM_ERROR",
+        error: err.message,
+        recipientUserId: targetDevice.user_id,
+        eventId,
+      };
+    }
+  }
+
+  // Development audit mode (when serviceAccountKey.json is not present)
+  console.log(`[DURGA TEST NOTIFICATION (AUDIT)] Validated test push to ${targetDevice.user_id}. Payload:`, payload);
+  return {
+    success: true,
+    status: "DEVELOPMENT_MOCK_DISPATCH_RECORDED",
+    messageId: `dev-msg-${crypto.randomUUID().substring(0, 8)}`,
+    recipientUserId: targetDevice.user_id,
+    eventId,
+    note: "Backend authenticated request and validated FCM message payload. (Service account key required for live transport)",
+  };
+}
+
 module.exports = {
   dispatchProximityPushNotifications,
+  sendTestPushNotification,
   isFcmConfigured: () => fcmInitialized,
+  getServiceAccountPath: () => SERVICE_ACCOUNT_PATH,
 };

@@ -17,48 +17,67 @@ const pendingOtps = new Map();
  * Generates an OTP for phone number registration/login.
  * In prototype development, whitelisted numbers receive a fixed OTP.
  */
-function requestOtp(phone) {
-  // Normalize phone
-  const cleanPhone = phone.trim();
-
-  // Test numbers for reliable physical device testing
-  if (cleanPhone === "+919876543210" || cleanPhone === "+919999999999" || cleanPhone === "+918888888888") {
-    pendingOtps.set(cleanPhone, { otp: "123456", expiresAt: Date.now() + 10 * 60 * 1000 });
-    console.log(`[DURGA AUTH] Whitelisted test number ${cleanPhone} requested OTP. Use fixed OTP: 123456`);
-    return {
-      success: true,
-      mode: "DEVELOPMENT_TEST_PROVIDER",
-      message: "Test OTP generated. (Development Provider)",
-      testOtp: "123456",
-    };
+function normalizePhone(phone) {
+  if (!phone) return "";
+  let digits = phone.replace(/[^0-9+]/g, "").trim();
+  if (!digits.startsWith("+") && digits.length === 10) {
+    digits = "+91" + digits;
   }
+  return digits;
+}
 
-  // Generate 6-digit cryptographic OTP
-  const generatedOtp = crypto.randomInt(100000, 999999).toString();
-  pendingOtps.set(cleanPhone, { otp: generatedOtp, expiresAt: Date.now() + 5 * 60 * 1000 });
+/**
+ * Generates an OTP for phone number registration/login.
+ * In development mode, provides a test OTP for verifiable physical testing.
+ * In production mode, generates a secure random 6-digit token and dispatches via SMS provider.
+ */
+function requestOtp(phone) {
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    throw new Error("Invalid phone number provided.");
+  }
+  const isDevMode = (process.env.DURGA_AUTH_MODE || "DEVELOPMENT") === "DEVELOPMENT";
+  const otpCode = isDevMode ? "123456" : crypto.randomInt(100000, 999999).toString();
+  const ttlMs = 5 * 60 * 1000; // 5 minutes validity
 
-  console.log(`[DURGA AUTH] OTP for ${cleanPhone}: ${generatedOtp} (Valid for 5 minutes)`);
+  pendingOtps.set(cleanPhone, {
+    otp: otpCode,
+    expiresAt: Date.now() + ttlMs,
+    requestedAt: Date.now(),
+  });
+
+  console.log(
+    `[DURGA AUTH ${isDevMode ? "DEV" : "PROD"}] Phone ${cleanPhone} requested OTP. Code: ${
+      isDevMode ? otpCode : "[REDACTED]"
+    }`
+  );
+
   return {
     success: true,
-    mode: "DEVELOPMENT_LOCAL_OTP",
-    message: "OTP generated for development testing. Inspect console logs.",
-    testOtp: generatedOtp,
+    mode: isDevMode ? "DEVELOPMENT_TEST_PROVIDER" : "PRODUCTION_SMS_PROVIDER",
+    message: isDevMode
+      ? "Test OTP generated (Development Provider)."
+      : "Verification SMS dispatched to mobile device.",
+    testOtp: isDevMode ? otpCode : undefined,
+    expiresInSeconds: ttlMs / 1000,
   };
 }
 
 /**
  * Verifies OTP and generates a signed JWT session.
+ * Requires active, unexpired record in pendingOtps.
  */
 async function verifyOtp(phone, otp, defaultName = "Citizen", defaultRole = "CITIZEN") {
-  const cleanPhone = phone.trim();
+  const cleanPhone = normalizePhone(phone);
+  const enteredOtp = (otp || "").trim();
   const record = pendingOtps.get(cleanPhone);
 
   if (!record || record.expiresAt < Date.now()) {
-    throw new Error("OTP expired or not requested.");
+    throw new Error("OTP expired or not requested. Please tap GET OTP.");
   }
 
-  if (record.otp !== otp.trim()) {
-    throw new Error("Invalid OTP entered.");
+  if (record.otp !== enteredOtp) {
+    throw new Error("Invalid OTP entered. Please verify the code and try again.");
   }
 
   // OTP verified -> remove from memory
@@ -173,4 +192,6 @@ module.exports = {
   verifyUserPin,
   authenticateToken,
   requireRole,
+  JWT_SECRET,
+  jwt,
 };

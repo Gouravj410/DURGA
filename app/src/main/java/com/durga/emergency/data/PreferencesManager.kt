@@ -22,9 +22,26 @@ class PreferencesManager(context: Context) {
         private const val KEY_CONTACT_NAME = "key_contact_name"
         private const val KEY_CONTACT_PHONE = "key_contact_phone"
         private const val KEY_SERVER_BASE_URL = "key_server_base_url"
+        private const val KEY_FCM_TOKEN = "key_fcm_token"
+        private const val KEY_DEVICE_ID = "key_device_id"
 
-        const val DEFAULT_SERVER_URL = "http://10.203.117.118:3000/api/v1"
+        val DEFAULT_SERVER_URL: String = com.durga.emergency.BuildConfig.DEFAULT_BACKEND_URL
     }
+
+    var fcmToken: String?
+        get() = prefs.getString(KEY_FCM_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_FCM_TOKEN, value).apply()
+
+    var deviceId: String
+        get() {
+            var id = prefs.getString(KEY_DEVICE_ID, null)
+            if (id.isNullOrEmpty()) {
+                id = "DEV-" + java.util.UUID.randomUUID().toString().take(8).uppercase()
+                prefs.edit().putString(KEY_DEVICE_ID, id).apply()
+            }
+            return id
+        }
+        set(value) = prefs.edit().putString(KEY_DEVICE_ID, value).apply()
 
     var isLoggedIn: Boolean
         get() = prefs.getBoolean(KEY_IS_LOGGED_IN, false)

@@ -29,20 +29,27 @@ import com.durga.emergency.data.model.EmergencyEvent
 import com.durga.emergency.databinding.ActivityMainBinding
 import com.durga.emergency.emergency.IncidentState
 import com.durga.emergency.emergency.TriggerSource
-import com.durga.emergency.sensors.ShakeDetector
+import com.durga.emergency.sensors.CustomGestureDetector
+import com.durga.emergency.sensors.GestureConfig
+import com.durga.emergency.sensors.GestureRepository
+import com.durga.emergency.sensors.GestureType
 import com.durga.emergency.service.DurgaSafetyService
 import com.durga.emergency.ui.login.LoginActivity
+import com.durga.emergency.ui.gesture.GestureSettingsActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private lateinit var prefs: PreferencesManager
+    private lateinit var gestureRepo: GestureRepository
 
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
-    private var shakeDetector: ShakeDetector? = null
+    private var customGestureDetector: CustomGestureDetector? = null
     private lateinit var audioPlayer: DurgaAudioPlayer
 
     private var alarmRingtone: Ringtone? = null
@@ -53,8 +60,16 @@ class MainActivity : AppCompatActivity() {
     ) { permissions ->
         val fineLocation = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val recordAudio = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-        if (fineLocation && recordAudio) {
-            Toast.makeText(this, "Permissions granted: GPS & Audio ready", Toast.LENGTH_SHORT).show()
+        val postNotifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.POST_NOTIFICATIONS] ?: false
+        } else {
+            true
+        }
+
+        if (fineLocation && recordAudio && postNotifications) {
+            Toast.makeText(this, "Permissions active: Location, Audio & Push Alerts ready", Toast.LENGTH_SHORT).show()
+        } else if (!postNotifications && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(this, "⚠️ Notification permission denied. Background alerts will not appear on lock screen.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -82,6 +97,9 @@ class MainActivity : AppCompatActivity() {
         // Start Persistent Background Notification Trigger (Android 10-14 compliant)
         DurgaSafetyService.startService(this)
 
+        // Retrieve and synchronize real FCM token with central backend
+        com.durga.emergency.utils.FcmTokenHelper.syncRegistrationToken(this)
+
         handleIncomingIntent(intent)
     }
 
@@ -95,34 +113,67 @@ class MainActivity : AppCompatActivity() {
         if (intent?.action == DurgaSafetyService.ACTION_TRIGGER_SOS) {
             Toast.makeText(this, "🔴 Lock-Screen / Notification SOS Triggered!", Toast.LENGTH_LONG).show()
             viewModel.triggerEmergency(TriggerSource.PERSISTENT_NOTIFICATION_ACTION)
+            return
+        }
+
+        val isTestNotification = intent?.getBooleanExtra("EXTRA_IS_TEST_NOTIFICATION", false) ?: false
+        val eventId = intent?.getStringExtra("EXTRA_EVENT_ID") ?: ""
+
+        if (isTestNotification) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("✅ Internet Push Notification Verified")
+                .setMessage("Successfully received and opened DURGA Internet Test Notification.\n\nEvent ID: ${eventId.ifEmpty { "TEST-FCM-VERIFIED" }}\nTransport: Firebase Cloud Messaging (FCM HTTP v1)")
+                .setPositiveButton("OK", null)
+                .show()
         }
     }
 
     private fun setupSensors() {
+        gestureRepo = GestureRepository.getInstance(this)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
-        shakeDetector = ShakeDetector {
-            runOnUiThread {
-                Toast.makeText(this, "⚠️ Gesture detected! 3 deliberate shakes verified.", Toast.LENGTH_SHORT).show()
-                viewModel.triggerEmergency(TriggerSource.IN_APP_SHAKE_GESTURE)
+        val primary = gestureRepo.getPrimaryGesture()
+        customGestureDetector = CustomGestureDetector(
+            config = primary,
+            onGestureMatched = { matchedConfig, confidence ->
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "🚨 SOS Triggered: ${matchedConfig.name} (${(confidence * 100).toInt()}% confidence)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    viewModel.triggerEmergency(TriggerSource.IN_APP_SHAKE_GESTURE)
+                }
             }
-        }
+        )
     }
 
     override fun onResume() {
         super.onResume()
-        accelerometer?.let {
-            sensorManager?.registerListener(shakeDetector, it, SensorManager.SENSOR_DELAY_UI)
+        if (::gestureRepo.isInitialized) {
+            val primary = gestureRepo.getPrimaryGesture()
+            customGestureDetector?.config = primary
+
+            if (gestureRepo.isGestureActivationEnabled && primary.type == GestureType.MOTION_SHAKE_SEQUENCE) {
+                accelerometer?.let {
+                    sensorManager?.registerListener(customGestureDetector, it, SensorManager.SENSOR_DELAY_UI)
+                }
+            }
         }
     }
 
     override fun onPause() {
         super.onPause()
-        sensorManager?.unregisterListener(shakeDetector)
+        sensorManager?.unregisterListener(customGestureDetector)
     }
 
     private fun setupListeners() {
+        // Gesture Settings Button
+        binding.btnGestureSettings.setOnClickListener {
+            startActivity(Intent(this, GestureSettingsActivity::class.java))
+        }
+
         // SOS Button
         binding.btnSos.setOnClickListener {
             viewModel.triggerEmergency(TriggerSource.MANUAL_SOS_BUTTON)
@@ -286,12 +337,12 @@ class MainActivity : AppCompatActivity() {
                 binding.cardAreYouSafe.visibility = View.GONE
                 binding.layoutActiveIncidentActions.visibility = View.VISIBLE
                 binding.btnRepeatSos.visibility = View.VISIBLE
-                binding.btnCancelWithPin.visibility = View.GONE // PERMANENTLY DISABLED
-                binding.tvRepeatSosLockWarning.visibility = View.VISIBLE
+                binding.btnCancelWithPin.visibility = View.VISIBLE // UNIFIED POLICY: Cancellation enabled across all triggers
+                binding.tvRepeatSosLockWarning.visibility = View.GONE
 
                 binding.tvStatusTitle.text = getString(R.string.status_repeat_active)
                 binding.tvStatusTitle.setTextColor(ContextCompat.getColor(this, R.color.durga_red_bright))
-                binding.tvStatusSubtitle.text = "Repeat SOS active. Ordinary cancel locked. Responder must resolve."
+                binding.tvStatusSubtitle.text = "Repeat SOS re-notified. Responders alerted. Enter secret code to cancel."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_red_primary))
             }
 
@@ -341,7 +392,7 @@ class MainActivity : AppCompatActivity() {
         if (!viewModel.stateMachine.isPinCancellationPermitted()) {
             Toast.makeText(
                 this,
-                "Cancellation locked: Repeat SOS lockdown requires authorized responder resolution.",
+                "Cancellation locked: Exceeded maximum incorrect PIN attempts. Please wait.",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -349,7 +400,7 @@ class MainActivity : AppCompatActivity() {
 
         val input = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "4-digit security PIN (default: 1234)"
+            hint = "4-digit secret security PIN"
             textAlignment = View.TEXT_ALIGNMENT_CENTER
             textSize = 20f
         }
@@ -395,12 +446,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAppPermissions() {
-        val permissions = arrayOf(
+        val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.RECORD_AUDIO
         )
-        permissionLauncher.launch(permissions)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     private fun handleNearbyProximityAlert(event: EmergencyEvent?) {
@@ -418,15 +472,19 @@ class MainActivity : AppCompatActivity() {
 
             // View Map navigation
             binding.btnProximityViewMap.setOnClickListener {
-                val lat = event.latitude ?: 18.5204
-                val lon = event.longitude ?: 73.8567
-                val gmmIntentUri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(Emergency+Distress+Location)")
-                val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
-                try {
-                    startActivity(mapIntent)
-                } catch (e: Exception) {
-                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon"))
-                    startActivity(browserIntent)
+                val lat = event.latitude
+                val lon = event.longitude
+                if (lat != null && lon != null) {
+                    val gmmIntentUri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(Emergency+Distress+Location)")
+                    val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                    try {
+                        startActivity(mapIntent)
+                    } catch (e: Exception) {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon"))
+                        startActivity(browserIntent)
+                    }
+                } else {
+                    Toast.makeText(this, "Victim GPS coordinates pending or unavailable.", Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -493,11 +551,8 @@ class MainActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setTitle("DURGA Account & Device Info")
             .setMessage(message)
-            .setPositiveButton("Switch Account") { _, _ ->
-                val intent = Intent(this, LoginActivity::class.java).apply {
-                    putExtra("EXTRA_FORCE_RELOGIN", true)
-                }
-                startActivity(intent)
+            .setPositiveButton("📡 Send Internet Test Push") { _, _ ->
+                showSendTestNotificationDialog()
             }
             .setNegativeButton("Log Out") { _, _ ->
                 prefs.clearSession()
@@ -507,10 +562,50 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
                 finish()
             }
-            .setNeutralButton("🧪 Test Adjacent Alert UX") { _, _ ->
-                viewModel.simulateTestProximityAlert()
-                Toast.makeText(this, "Simulating Adjacent Phone SOS Alert...", Toast.LENGTH_SHORT).show()
+            .setNeutralButton("Switch Account") { _, _ ->
+                val intent = Intent(this, LoginActivity::class.java).apply {
+                    putExtra("EXTRA_FORCE_RELOGIN", true)
+                }
+                startActivity(intent)
             }
+            .show()
+    }
+
+    private fun showSendTestNotificationDialog() {
+        val input = EditText(this).apply {
+            hint = "Target phone (default: any nearby device)"
+            setText("+918888888888")
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Send Verified Internet Test Push")
+            .setMessage("This will trigger a real FCM test notification through the trusted backend to the recipient's phone.")
+            .setView(input)
+            .setPositiveButton("SEND PUSH") { _, _ ->
+                val targetPhone = input.text.toString().trim()
+                Toast.makeText(this, "Dispatching test push request to backend...", Toast.LENGTH_SHORT).show()
+
+                lifecycleScope.launch {
+                    val result = viewModel.sendTestPushNotification(targetPhone = targetPhone.ifEmpty { null })
+                    if (result.isSuccess) {
+                        val resp = result.getOrThrow()
+                        val alertMsg = if (resp.status == "FCM_SUBMISSION_ACCEPTED") {
+                            "✅ FCM Push Accepted by Firebase!\nMessage ID: ${resp.messageId}\nRecipient: ${resp.recipientUserId}"
+                        } else {
+                            "ℹ️ Provider Status: ${resp.status}\nNote: ${resp.note ?: "Queued in backend dispatch"}\nRecipient: ${resp.recipientUserId ?: "Eligible Device"}"
+                        }
+                        MaterialAlertDialogBuilder(this@MainActivity)
+                            .setTitle("Test Push Result")
+                            .setMessage(alertMsg)
+                            .setPositiveButton("OK", null)
+                            .show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

@@ -54,40 +54,41 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
-        // Optional Backend Connection Test
+        // Backend Connection Test
         binding.btnTestServer.setOnClickListener {
             val enteredUrl = binding.etServerUrl.text.toString().trim()
             if (enteredUrl.isNotEmpty()) {
                 prefs.serverBaseUrl = enteredUrl
+                apiClient.baseUrl = enteredUrl
             }
 
-            binding.tvServerStatus.text = "Checking link..."
+            binding.tvServerStatus.text = "Connecting to Central Cloud..."
             binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
             binding.btnTestServer.isEnabled = false
 
             lifecycleScope.launch {
-                val isOnline = withTimeoutOrNull(2500) {
+                val isOnline = withTimeoutOrNull(6000) {
                     apiClient.testConnection().getOrNull() == true
                 } ?: false
 
                 binding.btnTestServer.isEnabled = true
                 if (isOnline) {
-                    binding.tvServerStatus.text = "🟢 Connected to Laptop Portal"
+                    binding.tvServerStatus.text = "🟢 Central Emergency Cloud Connected"
                     binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_green_safe))
-                    Toast.makeText(this@LoginActivity, "Connected to Laptop Responder Portal!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@LoginActivity, "Central Emergency Cloud Online!", Toast.LENGTH_SHORT).show()
                 } else {
-                    binding.tvServerStatus.text = "🟡 Autonomous Mesh Active (No Server Needed)"
-                    binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_amber_warning))
+                    binding.tvServerStatus.text = "🔴 Central Cloud Unreachable"
+                    binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_red_bright))
                     Toast.makeText(
                         this@LoginActivity,
-                        "Laptop server not connected. Running in 100% Autonomous Device Mesh Mode.",
-                        Toast.LENGTH_SHORT
+                        "Could not reach central server. Check internet connection or API URL.",
+                        Toast.LENGTH_LONG
                     ).show()
                 }
             }
         }
 
-        // Request OTP Button (100% Free / Immediate In-App Verification)
+        // Request OTP Button (Calls Central Backend)
         binding.btnRequestOtp.setOnClickListener {
             val phone = binding.etPhone.text.toString().trim()
             if (phone.length < 10) {
@@ -95,18 +96,42 @@ class LoginActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            val testOtp = "123456"
-            binding.etOtp.setText(testOtp)
-            binding.tvOtpHint.text = "✅ Free Verification Code: 123456 Auto-Verified"
-            binding.tvOtpHint.setTextColor(ContextCompat.getColor(this, R.color.durga_green_safe))
-            Toast.makeText(this, "Verification Code: 123456 verified", Toast.LENGTH_SHORT).show()
+            val serverUrl = binding.etServerUrl.text.toString().trim()
+            if (serverUrl.isNotEmpty()) {
+                prefs.serverBaseUrl = serverUrl
+                apiClient.baseUrl = serverUrl
+            }
+
+            val cleanPhone = if (!phone.startsWith("+") && phone.length == 10) "+91$phone" else phone
+            binding.btnRequestOtp.isEnabled = false
+            binding.btnRequestOtp.text = "..."
+
+            lifecycleScope.launch {
+                val result = apiClient.requestOtp(cleanPhone)
+                binding.btnRequestOtp.isEnabled = true
+                binding.btnRequestOtp.text = "GET OTP"
+
+                if (result.isSuccess) {
+                    val testOtp = result.getOrNull()?.ifEmpty { "123456" } ?: "123456"
+                    binding.etOtp.setText(testOtp)
+                    binding.tvOtpHint.text = "✅ Verification Code: $testOtp received"
+                    binding.tvOtpHint.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_green_safe))
+                    Toast.makeText(this@LoginActivity, "OTP received: $testOtp", Toast.LENGTH_SHORT).show()
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Server unreachable"
+                    binding.tvOtpHint.text = "❌ Could not request OTP: $err"
+                    binding.tvOtpHint.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_red_bright))
+                    Toast.makeText(this@LoginActivity, "Central server connection error. Verify API URL.", Toast.LENGTH_LONG).show()
+                }
+            }
         }
 
-        // Main Login / Registration Submit (Self-Sufficient / Autonomous)
+        // Main Login / Registration Submit (Central Backend Verification)
         binding.btnVerifyAndLogin.setOnClickListener {
             val name = binding.etName.text.toString().trim().ifEmpty { "Protected Citizen" }
             val phone = binding.etPhone.text.toString().trim()
             val pin = binding.etPin.text.toString().trim()
+            val otp = binding.etOtp.text.toString().trim()
             val serverUrl = binding.etServerUrl.text.toString().trim()
 
             if (phone.length < 10) {
@@ -117,38 +142,64 @@ class LoginActivity : AppCompatActivity() {
                 Toast.makeText(this, "Emergency PIN must be exactly 4 digits", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            if (otp.isEmpty()) {
+                Toast.makeText(this, "Please request and enter OTP verification code", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
-            // 1. Save locally directly on the phone — NEVER BLOCKED BY SERVER
-            val localUserId = "USR-" + phone.filter { it.isDigit() }.takeLast(8)
-            prefs.isLoggedIn = true
-            prefs.userId = localUserId
-            prefs.userName = name
-            prefs.userPhone = phone
-            prefs.securityPin = pin
             if (serverUrl.isNotEmpty()) {
                 prefs.serverBaseUrl = serverUrl
+                apiClient.baseUrl = serverUrl
             }
 
-            // 2. Non-blocking optional background server sync
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    withTimeoutOrNull(2000) {
-                        apiClient.verifyOtp(phone, "123456", name, "CITIZEN")
-                        apiClient.setUserPin(pin)
-                        apiClient.registerDevice(
-                            fcmToken = "DURGA_DEVICE_${phone.takeLast(4)}",
-                            latitude = 18.5204,
-                            longitude = 73.8567,
-                            accuracy = 10.0f
-                        )
+            val cleanPhone = if (!phone.startsWith("+") && phone.length == 10) "+91$phone" else phone
+
+            binding.btnVerifyAndLogin.isEnabled = false
+            binding.btnVerifyAndLogin.text = "VERIFYING WITH CENTRAL CLOUD..."
+
+            lifecycleScope.launch {
+                val authResult = apiClient.verifyOtp(cleanPhone, otp, name, "CITIZEN")
+
+                if (authResult.isSuccess) {
+                    val auth = authResult.getOrThrow()
+                    prefs.authToken = auth.token
+                    prefs.userId = auth.userId
+                    prefs.userPhone = cleanPhone
+                    prefs.userName = name
+                    prefs.securityPin = pin
+                    prefs.isLoggedIn = true
+
+                    // Sync security PIN and initial device registration to backend
+                    launch(Dispatchers.IO) {
+                        try {
+                            apiClient.setUserPin(pin)
+                            apiClient.registerDevice(
+                                fcmToken = prefs.fcmToken,
+                                deviceId = prefs.deviceId,
+                                latitude = null,
+                                longitude = null,
+                                accuracy = null
+                            )
+                        } catch (e: Exception) {
+                            // Non-fatal background sync
+                        }
                     }
-                } catch (e: Exception) {
-                    // Silently ignore — standalone mesh handles emergency alerts directly
+                    com.durga.emergency.utils.FcmTokenHelper.syncRegistrationToken(this@LoginActivity)
+
+                    Toast.makeText(this@LoginActivity, "Welcome, $name! DURGA Cloud Active.", Toast.LENGTH_SHORT).show()
+                    launchMainActivity()
+                } else {
+                    binding.btnVerifyAndLogin.isEnabled = true
+                    binding.btnVerifyAndLogin.text = "VERIFY & ENTER DURGA"
+                    val errorMsg = authResult.exceptionOrNull()?.message ?: "Authentication failed"
+
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(this@LoginActivity)
+                        .setTitle("Central Server Authentication Failed")
+                        .setMessage("Could not authenticate with central emergency cloud:\n\n$errorMsg\n\nPlease check your internet connection, verify that the central backend is online, and verify the entered phone/OTP.")
+                        .setPositiveButton("OK", null)
+                        .show()
                 }
             }
-
-            Toast.makeText(this, "Welcome, $name! DURGA Protection Active.", Toast.LENGTH_SHORT).show()
-            launchMainActivity()
         }
     }
 

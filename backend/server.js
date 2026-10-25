@@ -24,6 +24,8 @@ const {
   filterDevicesWithinRadius,
 } = require("./geo_utils");
 const {
+  jwt,
+  JWT_SECRET,
   requestOtp,
   verifyOtp,
   setUserPin,
@@ -31,7 +33,12 @@ const {
   authenticateToken,
   requireRole,
 } = require("./auth");
-const { dispatchProximityPushNotifications } = require("./notification_service");
+const {
+  dispatchProximityPushNotifications,
+  sendTestPushNotification,
+  isFcmConfigured,
+  getServiceAccountPath,
+} = require("./notification_service");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -170,6 +177,34 @@ app.post("/api/v1/devices/register", authenticateToken, async (req, res) => {
   }
 });
 
+app.post("/api/v1/devices/revoke-token", authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  const { deviceId, fcmToken } = req.body;
+  const now = Date.now();
+  try {
+    if (deviceId) {
+      await runQuery(
+        "UPDATE devices SET fcm_token = NULL, updated_at = ? WHERE id = ? AND user_id = ?",
+        [now, deviceId, userId]
+      );
+    } else if (fcmToken) {
+      await runQuery(
+        "UPDATE devices SET fcm_token = NULL, updated_at = ? WHERE fcm_token = ? AND user_id = ?",
+        [now, fcmToken, userId]
+      );
+    } else {
+      await runQuery(
+        "UPDATE devices SET fcm_token = NULL, updated_at = ? WHERE user_id = ?",
+        [now, userId]
+      );
+    }
+    await writeAuditLog(null, userId, req.user.role, "DEVICE_TOKEN_REVOKED", "FCM token revoked");
+    res.json({ success: true, message: "FCM push token revoked successfully." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==============================================================================
 // 3. Incident Lifecycle Endpoints
 // ==============================================================================
@@ -195,6 +230,28 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
   const now = Date.now();
 
   try {
+    // 0. Deduplicate rapid duplicate incidents (< 15 seconds) from the same user
+    const recentIncident = await getQuery(
+      `SELECT * FROM incidents
+       WHERE user_id = ?
+         AND status IN ('ACTIVE', 'REPEAT_ACTIVE', 'ACKNOWLEDGED', 'RESPONDING')
+         AND created_at > ?
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, now - 15000]
+    );
+
+    if (recentIncident) {
+      return res.status(200).json({
+        success: true,
+        incidentId: recentIncident.id,
+        status: recentIncident.status,
+        nearestPoliceStation: recentIncident.nearest_police_station,
+        nearestDistanceKm: recentIncident.nearest_police_station_distance,
+        isDuplicate: true,
+        message: "Duplicate incident request deduplicated within 15s window.",
+      });
+    }
+
     // 1. Calculate nearest verified police station
     const allStations = await allQuery("SELECT * FROM police_stations");
     const { station: nearestStation, distanceKm: nearestDist } = findNearestPoliceStation(
@@ -298,9 +355,14 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
   }
 });
 
+// Persistent rate limiting parameters for PIN cancellation attempts (persisted in SQLite pin_lockouts table)
+const MAX_PIN_FAILURES = 3;
+const PIN_LOCKOUT_MS = 2 * 60 * 1000; // 2 minutes lockout
+
 /**
  * Repeat SOS Trigger:
- * Escalates an existing active incident, bypasses AI analysis, and locks ordinary cancellation.
+ * Deduplicates or escalates priority during an ongoing incident without blocking citizen cancellation.
+ * Preserves the unified secret-code cancellation policy.
  */
 app.post("/api/v1/incidents/:id/repeat-sos", authenticateToken, async (req, res) => {
   const incidentId = req.params.id;
@@ -312,13 +374,17 @@ app.post("/api/v1/incidents/:id/repeat-sos", authenticateToken, async (req, res)
       return res.status(404).json({ error: "Incident not found." });
     }
 
+    if (incident.user_id !== req.user.userId && req.user.role !== "RESPONDER") {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to trigger repeat SOS for this incident." });
+    }
+
     if (incident.status === "RESOLVED" || incident.status === "CANCELLED") {
       return res.status(400).json({ error: `Cannot trigger repeat SOS on a ${incident.status} incident.` });
     }
 
-    // Update status to REPEAT_ACTIVE
+    // Refresh updated timestamp and record priority re-notification in audit trail
     await runQuery(
-      `UPDATE incidents SET status = 'REPEAT_ACTIVE', updated_at = ? WHERE id = ?`,
+      `UPDATE incidents SET updated_at = ? WHERE id = ?`,
       [now, incidentId]
     );
 
@@ -326,23 +392,23 @@ app.post("/api/v1/incidents/:id/repeat-sos", authenticateToken, async (req, res)
       incidentId,
       req.user.userId,
       req.user.role,
-      "REPEAT_SOS_ESCALATION",
-      "Ordinary cancellation permanently locked. Responder resolution strictly required."
+      "REPEAT_SOS_SIGNAL",
+      "Repeat SOS triggered during active incident. Priority escalated; re-notification broadcast to responders."
     );
 
     // Broadcast escalation to Responder Portal
     broadcastEvent("incident_escalated", {
       incidentId,
-      status: "REPEAT_ACTIVE",
-      notes: "Repeat SOS triggered. User cannot cancel.",
+      status: incident.status,
+      notes: "Repeat SOS signal received. Responders re-notified.",
       updatedAt: now,
     });
 
     res.json({
       success: true,
       incidentId,
-      status: "REPEAT_ACTIVE",
-      message: "Repeat SOS registered. Ordinary cancellation locked. Incident escalated to Responder Command.",
+      status: incident.status,
+      message: "Repeat SOS signal registered and broadcast to responders. Unified secret-code cancellation remains active.",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -350,8 +416,8 @@ app.post("/api/v1/incidents/:id/repeat-sos", authenticateToken, async (req, res)
 });
 
 /**
- * Cancels an active incident with PIN verification.
- * Strictly blocked if incident has entered REPEAT_ACTIVE state.
+ * Cancels an active incident with secret-code (PIN) verification.
+ * Applies uniformly across ALL SOS triggers (Manual, Shake, Gesture, Repeat SOS).
  */
 app.post("/api/v1/incidents/:id/cancel", authenticateToken, async (req, res) => {
   const incidentId = req.params.id;
@@ -365,30 +431,83 @@ app.post("/api/v1/incidents/:id/cancel", authenticateToken, async (req, res) => 
       return res.status(404).json({ error: "Incident not found." });
     }
 
-    // Strictly enforce Repeat SOS restriction
-    if (incident.status === "REPEAT_ACTIVE") {
+    // Ownership check: Only the incident creator (or an authorized responder) can cancel
+    if (incident.user_id !== userId && req.user.role !== "RESPONDER") {
+      return res.status(403).json({ error: "Forbidden: You cannot cancel an incident that does not belong to you." });
+    }
+
+    const cancellableStates = ["ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING"];
+    if (!cancellableStates.includes(incident.status)) {
+      return res.status(400).json({ error: `Cannot cancel incident in status: ${incident.status}` });
+    }
+
+    // Check persistent rate-limiting for failed PIN attempts from SQLite pin_lockouts table
+    let lockout = await getQuery("SELECT * FROM pin_lockouts WHERE user_id = ?", [userId]);
+    if (lockout && lockout.locked_until > now) {
+      const waitSec = Math.ceil((lockout.locked_until - now) / 1000);
+      return res.status(429).json({
+        error: `Cancellation temporarily locked due to repeated incorrect PIN entries. Try again in ${waitSec}s.`,
+      });
+    }
+
+    // Verify secret code (PIN) using PBKDF2 with timing-safe comparison
+    const isPinValid = await verifyUserPin(userId, pin);
+    if (!isPinValid) {
+      const currentFailures = (lockout ? lockout.failure_count : 0) + 1;
+      const remainingAttempts = Math.max(0, MAX_PIN_FAILURES - currentFailures);
+
+      if (currentFailures >= MAX_PIN_FAILURES) {
+        const lockedUntil = now + PIN_LOCKOUT_MS;
+        await runQuery(
+          `INSERT INTO pin_lockouts (user_id, failure_count, locked_until, updated_at)
+           VALUES (?, 0, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+             failure_count = 0,
+             locked_until = ?,
+             updated_at = ?`,
+          [userId, lockedUntil, now, lockedUntil, now]
+        );
+
+        await writeAuditLog(
+          incidentId,
+          userId,
+          req.user.role,
+          "PIN_VERIFICATION_LOCKED",
+          `Exceeded maximum incorrect PIN attempts (${MAX_PIN_FAILURES}). Locked for 2 minutes across server reboots.`
+        );
+
+        return res.status(429).json({
+          error: "Too many incorrect PIN attempts. Cancellation temporarily locked for 2 minutes.",
+          remainingAttempts: 0,
+        });
+      }
+
+      await runQuery(
+        `INSERT INTO pin_lockouts (user_id, failure_count, locked_until, updated_at)
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           failure_count = ?,
+           locked_until = 0,
+           updated_at = ?`,
+        [userId, currentFailures, now, currentFailures, now]
+      );
+
       await writeAuditLog(
         incidentId,
         userId,
         req.user.role,
-        "CANCEL_REJECTED_LOCKDOWN",
-        "Attempted PIN cancellation on REPEAT_ACTIVE incident."
+        "PIN_VERIFICATION_FAILED",
+        `Incorrect cancellation PIN entered. Attempts remaining: ${remainingAttempts}`
       );
-      return res.status(403).json({
-        error: "Cancellation rejected: Repeat SOS lockdown in effect. Only an authorized responder can resolve.",
+
+      return res.status(401).json({
+        error: "Incorrect PIN entered.",
+        remainingAttempts,
       });
     }
 
-    if (incident.status !== "ACTIVE") {
-      return res.status(400).json({ error: `Cannot cancel incident in status: ${incident.status}` });
-    }
-
-    // Verify PIN
-    const isPinValid = await verifyUserPin(userId, pin);
-    if (!isPinValid) {
-      await writeAuditLog(incidentId, userId, req.user.role, "PIN_VERIFICATION_FAILED", "Incorrect cancellation PIN entered.");
-      return res.status(401).json({ error: "Incorrect PIN entered." });
-    }
+    // Valid PIN verified -> clear persistent lockout record
+    await runQuery("DELETE FROM pin_lockouts WHERE user_id = ?", [userId]);
 
     // Update status to CANCELLED
     await runQuery(
@@ -401,7 +520,7 @@ app.post("/api/v1/incidents/:id/cancel", authenticateToken, async (req, res) => 
       userId,
       req.user.role,
       "INCIDENT_CANCELLED",
-      "Cancelled by user via verified PIN."
+      "Cancelled by user via verified secret code (PIN). Unified cancellation policy applied."
     );
 
     broadcastEvent("incident_cancelled", {
@@ -434,9 +553,13 @@ app.patch("/api/v1/incidents/:id/location", authenticateToken, async (req, res) 
   }
 
   try {
-    const incident = await getQuery("SELECT status FROM incidents WHERE id = ?", [incidentId]);
+    const incident = await getQuery("SELECT user_id, status FROM incidents WHERE id = ?", [incidentId]);
     if (!incident) {
       return res.status(404).json({ error: "Incident not found." });
+    }
+
+    if (incident.user_id !== req.user.userId && req.user.role !== "RESPONDER") {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to update location for this incident." });
     }
 
     // Location streaming is only permitted during active emergency states
@@ -481,6 +604,21 @@ app.post("/api/v1/incidents/:id/audio", authenticateToken, upload.single("audio"
   }
 
   try {
+    const incident = await getQuery("SELECT user_id, status FROM incidents WHERE id = ?", [incidentId]);
+    if (!incident) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
+      return res.status(404).json({ error: "Incident not found." });
+    }
+
+    if (incident.user_id !== req.user.userId && req.user.role !== "RESPONDER") {
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
+      return res.status(403).json({ error: "Forbidden: You are not authorized to upload audio for this incident." });
+    }
+
     const relativePath = path.relative(__dirname, req.file.path);
     await runQuery(`UPDATE incidents SET audio_file_path = ?, updated_at = ? WHERE id = ?`, [
       relativePath,
@@ -517,10 +655,34 @@ app.post("/api/v1/incidents/:id/audio", authenticateToken, upload.single("audio"
 app.get("/api/v1/incidents/:id/audio", async (req, res) => {
   const incidentId = req.params.id;
 
+  // Accept token from Authorization header or URL query parameter (for HTML5 audio elements)
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.substring(7);
+  } else if (req.query.token) {
+    token = req.query.token;
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: "Authentication required to access incident audio." });
+  }
+
   try {
-    const incident = await getQuery("SELECT audio_file_path, status FROM incidents WHERE id = ?", [incidentId]);
+    let user;
+    try {
+      user = jwt.verify(token, JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ error: "Invalid or expired token." });
+    }
+
+    const incident = await getQuery("SELECT user_id, audio_file_path, status FROM incidents WHERE id = ?", [incidentId]);
     if (!incident || !incident.audio_file_path) {
       return res.status(404).json({ error: "Audio evidence not found." });
+    }
+
+    if (incident.user_id !== user.userId && user.role !== "RESPONDER") {
+      return res.status(403).json({ error: "Forbidden: You do not have permission to access this incident's audio." });
     }
 
     const fullPath = path.join(__dirname, incident.audio_file_path);
@@ -539,11 +701,122 @@ app.get("/api/v1/incidents/:id/audio", async (req, res) => {
 // 4. Responder Command Portal Endpoints
 // ==============================================================================
 
-app.get("/api/v1/ping", (req, res) => {
-  res.json({ success: true, message: "DURGA Central Emergency Backend Online", timestamp: Date.now() });
+app.get(["/api/v1/ping", "/api/v1/health"], async (req, res) => {
+  let dbHealthy = false;
+  try {
+    const pingDb = await getQuery("SELECT 1 AS alive");
+    dbHealthy = pingDb && pingDb.alive === 1;
+  } catch (e) {
+    dbHealthy = false;
+  }
+
+  res.json({
+    success: true,
+    status: dbHealthy ? "HEALTHY" : "DEGRADED",
+    message: "DURGA Central Emergency Backend Online",
+    database: dbHealthy ? "CONNECTED_SQLITE_WAL" : "DISCONNECTED",
+    fcmConfigured: isFcmConfigured(),
+    authMode: process.env.DURGA_AUTH_MODE || "DEVELOPMENT",
+    activeSseStreams: sseClients.size,
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: Date.now(),
+  });
 });
 
-app.get("/api/v1/incidents/active", async (req, res) => {
+// In-memory rate limiting map for test notifications (userId -> timestamp)
+const testNotificationRateLimits = new Map();
+
+/**
+ * Controlled Internet Test Notification Endpoint.
+ * Authenticates caller, enforces rate limiting, resolves eligible recipient,
+ * and submits genuine FCM message.
+ */
+app.post("/api/v1/notifications/test", authenticateToken, async (req, res) => {
+  const senderUserId = req.user.userId;
+  const now = Date.now();
+
+  // Rate-limiting: 1 send every 10 seconds per user
+  const lastSent = testNotificationRateLimits.get(senderUserId) || 0;
+  if (now - lastSent < 10000) {
+    const waitSec = Math.ceil((10000 - (now - lastSent)) / 1000);
+    return res.status(429).json({
+      error: `Rate limited: Please wait ${waitSec} seconds before sending another test push.`,
+    });
+  }
+
+  const { targetUserId, targetPhone, title, body } = req.body;
+
+  try {
+    let targetDevice = null;
+
+    if (targetPhone) {
+      const cleanPhone = targetPhone.trim();
+      const targetUser = await getQuery(
+        "SELECT id FROM users WHERE phone = ? OR phone LIKE ?",
+        [cleanPhone, `%${cleanPhone.slice(-10)}`]
+      );
+      if (targetUser) {
+        targetDevice = await getQuery(
+          "SELECT * FROM devices WHERE user_id = ? AND fcm_token IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+          [targetUser.id]
+        );
+      }
+    } else if (targetUserId) {
+      targetDevice = await getQuery(
+        "SELECT * FROM devices WHERE user_id = ? AND fcm_token IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+        [targetUserId]
+      );
+    } else {
+      // Auto-resolve to any other active registered device in the database
+      targetDevice = await getQuery(
+        "SELECT * FROM devices WHERE user_id != ? AND fcm_token IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+        [senderUserId]
+      );
+    }
+
+    if (!targetDevice) {
+      return res.status(404).json({
+        error: "No eligible recipient device with active push token found. Ensure target phone is logged in.",
+      });
+    }
+
+    testNotificationRateLimits.set(senderUserId, now);
+
+    const result = await sendTestPushNotification(
+      req.user,
+      targetDevice,
+      title,
+      body,
+      async (invalidToken) => {
+        await runQuery("UPDATE devices SET fcm_token = NULL WHERE fcm_token = ?", [invalidToken]);
+      }
+    );
+
+    await writeAuditLog(
+      null,
+      senderUserId,
+      req.user.role,
+      "TEST_NOTIFICATION_SENT",
+      `Recipient: ${targetDevice.user_id}, Status: ${result.status}`
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error("[TEST NOTIFICATION ERROR]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/v1/notifications/status", (req, res) => {
+  res.json({
+    fcmConfigured: isFcmConfigured(),
+    serviceAccountPath: getServiceAccountPath(),
+    provider: "FCM_HTTP_V1",
+    mode: isFcmConfigured() ? "PRODUCTION_FCM_ACTIVE" : "DEVELOPMENT_AUDIT_MODE",
+  });
+});
+
+app.get("/api/v1/incidents/active", authenticateToken, requireRole("RESPONDER"), async (req, res) => {
   try {
     const incidents = await allQuery(`
       SELECT * FROM incidents
@@ -559,26 +832,22 @@ app.get("/api/v1/incidents/active", async (req, res) => {
 /**
  * Returns active incidents within the specified radius (default 1.0 km)
  * for a caller device, excluding the victim's own incidents.
+ * Sanitizes citizen identity and phone number for nearby citizen privacy.
  */
-app.get("/api/v1/incidents/proximity", async (req, res) => {
-  const { latitude, longitude, radius = 1.0, excludeUserId } = req.query;
+app.get("/api/v1/incidents/proximity", authenticateToken, async (req, res) => {
+  const { latitude, longitude, radius = 1.0 } = req.query;
   const callerLat = latitude ? parseFloat(latitude) : null;
   const callerLon = longitude ? parseFloat(longitude) : null;
   const radiusKm = parseFloat(radius);
+  const callerUserId = req.user.userId;
 
   try {
-    let sql = `
+    const incidents = await allQuery(`
       SELECT * FROM incidents
       WHERE status IN ('ACTIVE', 'REPEAT_ACTIVE', 'ACKNOWLEDGED', 'RESPONDING')
-    `;
-    const params = [];
-    if (excludeUserId) {
-      sql += " AND user_id != ?";
-      params.push(excludeUserId);
-    }
-    sql += " ORDER BY updated_at DESC";
-
-    const incidents = await allQuery(sql, params);
+        AND user_id != ?
+      ORDER BY updated_at DESC
+    `, [callerUserId]);
 
     const eligible = [];
     for (const inc of incidents) {
@@ -587,11 +856,20 @@ app.get("/api/v1/incidents/proximity", async (req, res) => {
         distanceKm = calculateHaversineDistanceKm(callerLat, callerLon, inc.latitude, inc.longitude);
       }
 
-      // If caller location is known, enforce radius <= 1.0 km
-      // If caller location is not yet fixed (e.g. indoor testing), treat as nearby for testing
       if (distanceKm === null || distanceKm <= radiusKm) {
+        // Privacy protection: Sanitize sensitive personal info for nearby citizens
         eligible.push({
-          ...inc,
+          id: inc.id,
+          status: inc.status,
+          latitude: inc.latitude,
+          longitude: inc.longitude,
+          location_accuracy: inc.location_accuracy,
+          distress_score: inc.distress_score,
+          distress_classification: inc.distress_classification,
+          trigger_source: inc.trigger_source,
+          nearest_police_station: inc.nearest_police_station,
+          created_at: inc.created_at,
+          updated_at: inc.updated_at,
           distanceKm: distanceKm !== null ? parseFloat(distanceKm.toFixed(3)) : 0.35,
         });
       }
@@ -603,11 +881,16 @@ app.get("/api/v1/incidents/proximity", async (req, res) => {
   }
 });
 
-app.get("/api/v1/incidents/:id", async (req, res) => {
+app.get("/api/v1/incidents/:id", authenticateToken, async (req, res) => {
   const incidentId = req.params.id;
   try {
     const incident = await getQuery("SELECT * FROM incidents WHERE id = ?", [incidentId]);
     if (!incident) return res.status(404).json({ error: "Incident not found." });
+
+    // Enforce authorization: only the incident owner or authorized responder can view full incident details
+    if (incident.user_id !== req.user.userId && req.user.role !== "RESPONDER") {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to view this incident record." });
+    }
 
     const history = await allQuery(
       "SELECT * FROM incident_location_history WHERE incident_id = ? ORDER BY timestamp ASC",

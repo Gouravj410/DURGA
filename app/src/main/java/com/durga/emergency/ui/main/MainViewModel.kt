@@ -24,7 +24,6 @@ import com.durga.emergency.emergency.UserRole
 import com.durga.emergency.location.DurgaLocation
 import com.durga.emergency.location.FusedLocationProvider
 import com.durga.emergency.location.LocationProvider
-import com.durga.emergency.mesh.DirectMeshManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -40,7 +39,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = PreferencesManager(application)
     private val apiClient = DurgaApiClient.getInstance(application)
-    private val directMesh = DirectMeshManager.getInstance(application)
     private val policeRepo: PoliceStationRepository = LocalPoliceStationRepository(application)
     private val locationProvider: LocationProvider = FusedLocationProvider(application)
     private val audioRecorder: AudioRecorder = DurgaPcmAudioRecorder(application)
@@ -97,38 +95,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var proximityMonitoringJob: Job? = null
 
     init {
-        // Authenticate development session with the backend (optional) and register device
+        // Authenticate development session with the backend and register device
         ensureBackendSession()
         startProximityMonitoring()
-        startDirectMeshListener()
-    }
-
-    private fun startDirectMeshListener() {
-        directMesh.startListening(
-            myUserId = prefs.userId,
-            onAlert = { event ->
-                Log.i(TAG, "🚨 [DIRECT MESH ALERT RECEIVED] Victim: ${event.userName}, Phone: ${event.emergencyContactPhone}")
-                _nearbyMeshAlertEvent.postValue(event)
-            },
-            onCancel = { cancelledUserId ->
-                Log.i(TAG, "Direct mesh cancellation received from user $cancelledUserId")
-                if (_nearbyMeshAlertEvent.value?.userId == cancelledUserId) {
-                    _nearbyMeshAlertEvent.postValue(null)
-                }
-            }
-        )
     }
 
     private fun ensureBackendSession() {
         viewModelScope.launch {
             try {
-                withTimeoutOrNull(2500) {
+                withTimeoutOrNull(8000) {
                     val phone = prefs.userPhone
                     val name = prefs.userName
 
                     // Request test OTP and verify
                     val otpResult = apiClient.requestOtp(phone)
-                    val testOtp = otpResult.getOrNull() ?: "123456"
+                    val testOtp = otpResult.getOrNull()?.ifEmpty { "123456" } ?: "123456"
 
                     val authResult = apiClient.verifyOtp(phone, testOtp, name, "CITIZEN")
                     if (authResult.isSuccess) {
@@ -140,7 +121,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // Acquire initial GPS location
                         val loc = locationProvider.getCurrentLocation()
                         apiClient.registerDevice(
-                            fcmToken = "DURGA_DEVICE_TOKEN_${phone.takeLast(4)}",
+                            fcmToken = prefs.fcmToken,
+                            deviceId = prefs.deviceId,
                             latitude = loc?.latitude,
                             longitude = loc?.longitude,
                             accuracy = loc?.accuracy
@@ -150,9 +132,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Backend connection note: Operating in 100% autonomous mesh mode (${e.message})")
+                Log.w(TAG, "Backend connection note: Central cloud dispatch offline (${e.message})")
             }
         }
+    }
+
+    suspend fun sendTestPushNotification(
+        targetUserId: String? = null,
+        targetPhone: String? = null
+    ): Result<com.durga.emergency.data.api.TestNotificationResponse> {
+        return apiClient.sendTestNotification(targetUserId, targetPhone)
     }
 
     /**
@@ -171,8 +160,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         state == IncidentState.RESOLVED) {
 
                         val loc = locationProvider.getCurrentLocation()
-                        val lat = loc?.latitude ?: 18.5204
-                        val lon = loc?.longitude ?: 73.8567
+                        val lat = loc?.latitude
+                        val lon = loc?.longitude
                         val myUserId = prefs.userId
 
                         val result = apiClient.getNearbyIncidents(
@@ -314,7 +303,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         safetyTimer?.cancel()
         stateMachine.processEvent(IncidentEvent.UserConfirmedSafe)
         _locationInfo.value = "Standby"
-        directMesh.broadcastEmergencyCancellation(prefs.userId, prefs.userName)
     }
 
     /**
@@ -335,18 +323,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         source: TriggerSource
     ) {
         val location: DurgaLocation? = locationProvider.getCurrentLocation()
-        val lat = location?.latitude ?: 18.5204
-        val lon = location?.longitude ?: 73.8567
-        val accuracy = location?.accuracy ?: 12.0f
+        val lat = location?.latitude
+        val lon = location?.longitude
+        val accuracy = location?.accuracy
 
-        _locationInfo.value = String.format("%.4f, %.4f (±%.1fm)", lat, lon, accuracy)
+        _locationInfo.value = if (lat != null && lon != null && accuracy != null) {
+            String.format("%.4f, %.4f (±%.1fm)", lat, lon, accuracy)
+        } else {
+            "Location acquiring (GPS pending)"
+        }
 
         // Haversine nearest police station lookup
-        val (nearestStation, distanceKm) = policeRepo.findNearestStation(lat, lon)
-        val stationName = nearestStation?.name ?: "Central Police Station"
-        _nearestStationInfo.value = "$stationName (~${String.format("%.2f", distanceKm ?: 0.0)} km)"
+        val (nearestStation, distanceKm) = if (lat != null && lon != null) {
+            policeRepo.findNearestStation(lat, lon)
+        } else {
+            Pair(null, null)
+        }
+        val stationName = nearestStation?.name ?: "Central Emergency Unit"
+        _nearestStationInfo.value = if (distanceKm != null) {
+            "$stationName (~${String.format("%.2f", distanceKm)} km)"
+        } else {
+            stationName
+        }
 
-        // Call Backend API to create incident (optional cloud sync)
+        // Call Backend API to create incident
         val result = apiClient.createIncident(
             latitude = lat,
             longitude = lon,
@@ -357,18 +357,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val incidentId = result.getOrNull()?.incidentId ?: ("INC-" + System.currentTimeMillis().toString().takeLast(6))
-
-        // 1. Direct Phone-to-Phone Emergency Mesh Broadcast (ZERO API / ZERO SERVER)
-        directMesh.startEmergencyBroadcast(
-            incidentId = incidentId,
-            userId = prefs.userId,
-            userName = prefs.userName,
-            userPhone = prefs.userPhone,
-            latitude = lat,
-            longitude = lon,
-            distressScore = distressScore,
-            distressClass = distressClass
-        )
 
         // Upload audio evidence if available
         if (audioFile != null && audioFile.exists()) {
@@ -416,66 +404,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Submit PIN for cancellation.
+     * Enforces the unified secret-code cancellation policy:
+     * - Operates across all triggers and repeat SOS events uniformly.
+     * - If incident is active on server, waits for authoritative backend confirmation.
+     * - Never falsely claims cancellation if server is offline or request fails.
      */
     fun submitCancellationPin(enteredPin: String) {
         if (!stateMachine.isPinCancellationPermitted()) {
-            _pinErrorMessage.value = "Cancellation locked: Repeat SOS lockdown requires authorized responder."
+            _pinErrorMessage.value = "Cancellation locked: Maximum incorrect attempts reached or invalid state."
             return
         }
 
-        val storedPin = prefs.securityPin
-        val isCorrect = enteredPin.trim() == storedPin.trim()
+        val incidentId = stateMachine.currentIncidentId
 
-        if (isCorrect) {
-            val incidentId = stateMachine.currentIncidentId
-            if (incidentId != null) {
-                viewModelScope.launch {
-                    apiClient.cancelIncident(incidentId, enteredPin)
-                }
-            }
-            // Broadcast cancellation to all adjacent phones over Direct Mesh
-            directMesh.broadcastEmergencyCancellation(prefs.userId, prefs.userName)
-
-            stateMachine.recordPinAttempt(true)
-            locationStreamingJob?.cancel()
-            _pinErrorMessage.value = null
-            _activeEmergencyEvent.value = null
-            Log.d(TAG, "Incident cancelled successfully with verified PIN.")
-        } else {
-            val accepted = stateMachine.recordPinAttempt(false)
-            _pinAttemptsLeft.value = stateMachine.pinAttemptsRemaining
-            if (stateMachine.isPinLocked) {
-                _pinErrorMessage.value = "Too many incorrect attempts. Cancellation locked."
+        // If no incident was ever escalated to backend (e.g. cancelled during initial countdown)
+        if (incidentId == null) {
+            val storedPin = prefs.securityPin
+            val isCorrect = enteredPin.trim() == storedPin.trim()
+            if (isCorrect) {
+                stateMachine.recordPinAttempt(true)
+                locationStreamingJob?.cancel()
+                _pinErrorMessage.value = null
+                _activeEmergencyEvent.value = null
+                Log.d(TAG, "Pre-escalation countdown cancelled with verified PIN.")
             } else {
+                stateMachine.recordPinAttempt(false)
+                _pinAttemptsLeft.value = stateMachine.pinAttemptsRemaining
                 _pinErrorMessage.value = "Incorrect PIN. Attempts remaining: ${stateMachine.pinAttemptsRemaining}"
+            }
+            return
+        }
+
+        // Active incident exists on backend -> authoritative confirmation required
+        viewModelScope.launch {
+            _pinErrorMessage.value = "Verifying secret code with authoritative server..."
+            val result = apiClient.cancelIncident(incidentId, enteredPin)
+
+            if (result.isSuccess) {
+                // Authoritative success confirmed by server
+                stateMachine.recordPinAttempt(true)
+                locationStreamingJob?.cancel()
+                _pinErrorMessage.value = null
+                _activeEmergencyEvent.value = null
+                Log.i(TAG, "Authoritative cancellation confirmed by backend for incident $incidentId")
+            } else {
+                val errorMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+                Log.w(TAG, "Cancellation attempt error: $errorMsg")
+
+                if (errorMsg.contains("HTTP 401")) {
+                    // Authoritative rejection: incorrect PIN
+                    stateMachine.recordPinAttempt(false)
+                    _pinAttemptsLeft.value = stateMachine.pinAttemptsRemaining
+                    if (stateMachine.isPinLocked) {
+                        _pinErrorMessage.value = "Too many incorrect attempts. Cancellation locked."
+                    } else {
+                        _pinErrorMessage.value = "Incorrect secret code. Attempts remaining: ${stateMachine.pinAttemptsRemaining}"
+                    }
+                } else if (errorMsg.contains("HTTP 429")) {
+                    _pinErrorMessage.value = "Rate limited: Too many failed attempts. Temporary cooldown in effect."
+                } else {
+                    // Offline / server unreachable
+                    // CRITICAL: Must NOT claim cancelled while backend still considers it active!
+                    _pinErrorMessage.value = "Cancellation pending: Could not reach authoritative server. Incident remains active until server confirmation."
+                }
             }
         }
     }
 
-    /**
-     * Diagnostic Test Helper: Simulates receiving a Proximity Alert on this device
-     * so you can immediately see and hear how adjacent alerting behaves even with 1 phone!
-     */
-    fun simulateTestProximityAlert() {
-        val testEvent = EmergencyEvent(
-            eventId = "INC-TEST-" + System.currentTimeMillis().toString().takeLast(4),
-            userId = "USER-TEST-ADJACENT",
-            userName = "Adjacent Citizen (Phone A)",
-            timestamp = System.currentTimeMillis(),
-            latitude = 18.5204,
-            longitude = 73.8567,
-            locationAccuracy = 5.0f,
-            distressScore = 0.94f,
-            distressClassification = "SCREAM_HIGH_DISTRESS",
-            emergencyLevel = "HIGH",
-            audioUrl = "",
-            emergencyContactPhone = "+919876543210",
-            nearestPoliceStationName = "Nearby Emergency Unit",
-            nearestPoliceStationDistanceKm = 0.05,
-            status = "ACTIVE"
-        )
-        _nearbyMeshAlertEvent.postValue(testEvent)
-    }
+
 
     fun setSecurityPin(pin: String) {
         prefs.securityPin = pin
@@ -502,6 +498,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         safetyTimer?.cancel()
         locationStreamingJob?.cancel()
         proximityMonitoringJob?.cancel()
-        directMesh.stop()
     }
 }

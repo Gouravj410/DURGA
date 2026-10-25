@@ -15,6 +15,10 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        val defaultBackendUrl = project.findProperty("DURGA_BACKEND_URL") as? String
+            ?: "https://dd6703398afa4b.lhr.life/api/v1"
+        buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$defaultBackendUrl\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -42,6 +46,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     testOptions {

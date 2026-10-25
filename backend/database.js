@@ -22,6 +22,9 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
   } else {
     console.log("[DURGA DB] Connected to SQLite database:", DB_PATH);
     db.run("PRAGMA foreign_keys = ON;");
+    db.run("PRAGMA journal_mode = WAL;");
+    db.run("PRAGMA synchronous = NORMAL;");
+    db.run("PRAGMA busy_timeout = 5000;");
     initSchema();
   }
 });
@@ -123,6 +126,17 @@ function initSchema() {
         phone TEXT NOT NULL,
         address TEXT NOT NULL,
         verified_date TEXT NOT NULL
+      )
+    `);
+
+    // 7. Persistent PIN Lockouts Table (Survives server reboots, ties lockout to user identity)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS pin_lockouts (
+        user_id TEXT PRIMARY KEY,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        locked_until INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
 
