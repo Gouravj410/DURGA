@@ -37,10 +37,15 @@ import com.durga.emergency.service.DurgaSafetyService
 import com.durga.emergency.ui.login.LoginActivity
 import com.durga.emergency.ui.gesture.GestureSettingsActivity
 import androidx.lifecycle.lifecycleScope
+import com.durga.emergency.data.api.DurgaApiClient
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+
+    private var lastHandledNotificationEventId: String? = null
+    private var lastHandledNotificationTimestamp: Long = 0L
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
@@ -78,7 +83,10 @@ class MainActivity : AppCompatActivity() {
 
         prefs = PreferencesManager(this)
         if (!prefs.isLoggedIn) {
-            startActivity(Intent(this, LoginActivity::class.java))
+            val loginIntent = Intent(this, LoginActivity::class.java).apply {
+                intent?.extras?.let { putExtras(it) }
+            }
+            startActivity(loginIntent)
             finish()
             return
         }
@@ -110,21 +118,106 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        if (intent?.action == DurgaSafetyService.ACTION_TRIGGER_SOS) {
+        if (intent == null) return
+
+        if (intent.action == DurgaSafetyService.ACTION_TRIGGER_SOS) {
             Toast.makeText(this, "🔴 Lock-Screen / Notification SOS Triggered!", Toast.LENGTH_LONG).show()
             viewModel.triggerEmergency(TriggerSource.PERSISTENT_NOTIFICATION_ACTION)
             return
         }
 
-        val isTestNotification = intent?.getBooleanExtra("EXTRA_IS_TEST_NOTIFICATION", false) ?: false
-        val eventId = intent?.getStringExtra("EXTRA_EVENT_ID") ?: ""
+        // Backwards-compatible identifier resolution
+        val eventId = intent.getStringExtra("EXTRA_EVENT_ID")
+            ?: intent.getStringExtra("EXTRA_INCIDENT_ID")
+            ?: intent.getStringExtra("eventId")
+            ?: intent.getStringExtra("incidentId")
+            ?: ""
+
+        val notificationType = intent.getStringExtra("EXTRA_NOTIFICATION_TYPE")
+            ?: intent.getStringExtra("notificationType")
+            ?: intent.getStringExtra("type")
+            ?: ""
+
+        val isTestNotification = intent.getBooleanExtra("EXTRA_IS_TEST_NOTIFICATION", false)
+            || notificationType == "DURGA_TEST"
+            || eventId.startsWith("TEST-")
+
+        val isEmergencyNotification = notificationType == "DURGA_EMERGENCY"
+            || intent.hasExtra("EXTRA_INCIDENT_ID")
+            || intent.hasExtra("EXTRA_EVENT_ID")
+            || intent.hasExtra("incidentId")
+            || intent.hasExtra("eventId")
 
         if (isTestNotification) {
+            val now = System.currentTimeMillis()
+            if (eventId.isNotEmpty() && eventId == lastHandledNotificationEventId && now - lastHandledNotificationTimestamp < 3000) {
+                return
+            }
+            lastHandledNotificationEventId = eventId
+            lastHandledNotificationTimestamp = now
+
             MaterialAlertDialogBuilder(this)
                 .setTitle("✅ Internet Push Notification Verified")
                 .setMessage("Successfully received and opened DURGA Internet Test Notification.\n\nEvent ID: ${eventId.ifEmpty { "TEST-FCM-VERIFIED" }}\nTransport: Firebase Cloud Messaging (FCM HTTP v1)")
                 .setPositiveButton("OK", null)
                 .show()
+            return
+        }
+
+        if (isEmergencyNotification) {
+            if (eventId.isEmpty()) {
+                Log.w("MainActivity", "Emergency notification tapped but incidentId/eventId was missing")
+                Toast.makeText(
+                    this,
+                    "Emergency notification received, but incident identifier was missing.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            if (eventId == lastHandledNotificationEventId && now - lastHandledNotificationTimestamp < 3000) {
+                return
+            }
+            lastHandledNotificationEventId = eventId
+            lastHandledNotificationTimestamp = now
+
+            // Extract telemetry extras safely
+            val latStr = intent.getStringExtra("EXTRA_LATITUDE")
+            val lat = latStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_LATITUDE")) intent.getDoubleExtra("EXTRA_LATITUDE", 0.0).takeIf { it != 0.0 } else null
+
+            val lonStr = intent.getStringExtra("EXTRA_LONGITUDE")
+            val lon = lonStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_LONGITUDE")) intent.getDoubleExtra("EXTRA_LONGITUDE", 0.0).takeIf { it != 0.0 } else null
+
+            val accuracyStr = intent.getStringExtra("EXTRA_ACCURACY")
+            val accuracy = accuracyStr?.toFloatOrNull() ?: if (intent.hasExtra("EXTRA_ACCURACY")) intent.getFloatExtra("EXTRA_ACCURACY", 15.0f) else null
+
+            val scoreStr = intent.getStringExtra("EXTRA_DISTRESS_SCORE")
+            val distressScore = scoreStr?.toFloatOrNull() ?: if (intent.hasExtra("EXTRA_DISTRESS_SCORE")) intent.getFloatExtra("EXTRA_DISTRESS_SCORE", 0.95f) else 0.95f
+
+            val classification = intent.getStringExtra("EXTRA_CLASSIFICATION") ?: "Acoustic Distress Confirmed"
+            val nearestStation = intent.getStringExtra("EXTRA_NEAREST_STATION") ?: "Nearest Police Station"
+            val distStr = intent.getStringExtra("EXTRA_DISTANCE_KM")
+            val distanceKm = distStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_DISTANCE_KM")) intent.getDoubleExtra("EXTRA_DISTANCE_KM", 0.05) else 0.05
+            val status = intent.getStringExtra("EXTRA_STATUS") ?: "ACTIVE"
+
+            viewModel.onEmergencyNotificationTapped(
+                eventId = eventId,
+                latitude = lat,
+                longitude = lon,
+                accuracy = accuracy,
+                distressScore = distressScore,
+                classification = classification,
+                nearestStation = nearestStation,
+                distanceKm = distanceKm,
+                status = status
+            )
+
+            Toast.makeText(
+                this,
+                "🚨 Emergency Incident #$eventId Opened",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -555,12 +648,7 @@ class MainActivity : AppCompatActivity() {
                 showSendTestNotificationDialog()
             }
             .setNegativeButton("Log Out") { _, _ ->
-                prefs.clearSession()
-                val intent = Intent(this, LoginActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                }
-                startActivity(intent)
-                finish()
+                performLogout()
             }
             .setNeutralButton("Switch Account") { _, _ ->
                 val intent = Intent(this, LoginActivity::class.java).apply {
@@ -607,6 +695,31 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun performLogout() {
+        val deviceId = prefs.deviceId
+        val fcmToken = prefs.fcmToken
+        val authToken = prefs.authToken
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                if (!authToken.isNullOrEmpty()) {
+                    val apiClient = DurgaApiClient.getInstance(applicationContext)
+                    apiClient.revokeDeviceToken(deviceId, fcmToken)
+                    Log.i("MainActivity", "Backend device token revoked successfully on logout")
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Device token revocation on backend note: ${e.message}")
+            }
+        }
+
+        prefs.clearSession()
+        val intent = Intent(this, LoginActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        startActivity(intent)
+        finish()
     }
 
     override fun onDestroy() {

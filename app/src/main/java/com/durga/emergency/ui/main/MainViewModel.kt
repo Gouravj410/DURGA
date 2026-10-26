@@ -203,6 +203,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Handles emergency notification tap: immediately presents proximity incident details
+     * and attempts to fetch live incident updates from the central backend.
+     */
+    fun onEmergencyNotificationTapped(
+        eventId: String,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        accuracy: Float? = null,
+        distressScore: Float = 0.95f,
+        classification: String = "Acoustic Distress Confirmed",
+        nearestStation: String = "Nearest Police Station",
+        distanceKm: Double? = 0.05,
+        status: String = "ACTIVE"
+    ) {
+        if (eventId.isEmpty()) return
+
+        Log.i(TAG, "🚨 Emergency notification tapped for incident: $eventId")
+        val tappedEvent = EmergencyEvent(
+            eventId = eventId,
+            userId = "PROXIMITY_ALERT",
+            userName = "Nearby Emergency SOS",
+            timestamp = System.currentTimeMillis(),
+            latitude = latitude,
+            longitude = longitude,
+            locationAccuracy = accuracy,
+            distressScore = distressScore,
+            distressClassification = classification,
+            emergencyLevel = "CRITICAL",
+            nearestPoliceStationName = nearestStation,
+            nearestPoliceStationDistanceKm = distanceKm,
+            status = status
+        )
+        _nearbyMeshAlertEvent.postValue(tappedEvent)
+
+        viewModelScope.launch {
+            try {
+                val loc = locationProvider.getCurrentLocation()
+                val result = apiClient.getNearbyIncidents(
+                    latitude = loc?.latitude ?: latitude,
+                    longitude = loc?.longitude ?: longitude,
+                    radiusKm = 2.0,
+                    excludeUserId = prefs.userId
+                )
+                if (result.isSuccess) {
+                    val matching = result.getOrNull()?.firstOrNull { it.eventId == eventId }
+                    if (matching != null) {
+                        _nearbyMeshAlertEvent.postValue(matching)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Syncing tapped incident from backend note: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Triggered by in-app button, persistent notification, or 3-shake gesture.
      */
     fun triggerEmergency(source: TriggerSource = TriggerSource.MANUAL_SOS_BUTTON) {

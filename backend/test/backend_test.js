@@ -12,6 +12,7 @@
 
 const http = require("http");
 const { runQuery, getQuery } = require("../database");
+const { parseNotificationPayload, dispatchProximityPushNotifications } = require("../notification_service");
 
 const BASE_URL = "http://localhost:3000";
 
@@ -134,6 +135,7 @@ async function runTests() {
       role: "CITIZEN",
     });
     const citizenBToken = verifyB.data.token;
+    const citizenBId = verifyB.data.user.id;
 
     // Coordinates ~450 meters away: 18.5230, 73.8590
     await makeRequest(
@@ -332,8 +334,10 @@ async function runTests() {
     );
     assert(testPushRes.status === 200, "Test notification request returned HTTP 200");
     assert(testPushRes.data.success === true, "Notification dispatch marked successful");
-    assert(testPushRes.data.recipientUserId === "USER-AEEC8A2C", "Recipient resolved to Citizen B");
+    assert(testPushRes.data.recipientUserId === citizenBId, "Recipient resolved to Citizen B");
     assert(testPushRes.data.eventId.startsWith("TEST-"), "Test event ID generated with TEST- prefix");
+    assert(testPushRes.data.incidentId === testPushRes.data.eventId, "Test push contains consistent eventId and incidentId");
+    assert(testPushRes.data.isRealDelivery === false, "Mock dispatch truthfully reports isRealDelivery: false when credentials unconfigured");
     console.log(`  ✓ Test Push Status: ${testPushRes.data.status}, Message ID: ${testPushRes.data.messageId}`);
 
     // 15. Rate Limiting Enforcement on Test Push
@@ -433,9 +437,70 @@ async function runTests() {
     assert(dbDevice.fcm_token === null, "Device FCM token cleared to NULL in SQLite");
     console.log("  ✓ Device FCM token successfully revoked and cleared in database");
 
+    // 23. Notification Payload Contract Consistency & Safe Fallbacks
+    console.log("\n[TEST 23] Notification Payload Identifier Consistency & Safe Fallbacks");
+    // 23a. Payload with eventId only
+    const parsed1 = parseNotificationPayload({ eventId: "INC-TEST-001", type: "DURGA_EMERGENCY" });
+    assert(parsed1.isValid === true, "Payload with eventId only is valid");
+    assert(parsed1.eventId === "INC-TEST-001", "eventId preserved");
+    assert(parsed1.incidentId === "INC-TEST-001", "incidentId populated from eventId");
+    assert(parsed1.isTest === false, "Recognized as emergency notification");
+
+    // 23b. Payload with incidentId only (backward compatibility)
+    const parsed2 = parseNotificationPayload({ incidentId: "INC-LEGACY-002" });
+    assert(parsed2.isValid === true, "Legacy payload with incidentId only is valid");
+    assert(parsed2.eventId === "INC-LEGACY-002", "eventId populated from incidentId");
+    assert(parsed2.incidentId === "INC-LEGACY-002", "incidentId preserved");
+
+    // 23c. Test notification detection
+    const parsedTest = parseNotificationPayload({ eventId: "TEST-9999", type: "DURGA_TEST" });
+    assert(parsedTest.isTest === true, "Recognized as test notification via type");
+
+    // 23d. Missing or malformed identifier handling
+    const parsedInvalid = parseNotificationPayload({});
+    assert(parsedInvalid.isValid === false, "Empty payload safely marked invalid without crash");
+    assert(parsedInvalid.eventId === null, "Missing eventId resolved to null");
+
+    const parsedNull = parseNotificationPayload(null);
+    assert(parsedNull.isValid === false, "Null payload safely marked invalid without crash");
+    console.log("  ✓ Notification contract consistency & fallback handling verified");
+
+    // 24. Proximity Push Dispatch Payload Verification & Token Cleanup
+    console.log("\n[TEST 24] Proximity Push Dispatch Payload Verification & Cleanup Callback");
+    let cleanedToken = null;
+    const testIncident = {
+      id: "INC-CONTRACT-999",
+      latitude: 18.5204,
+      longitude: 73.8567,
+      distress_score: 0.95,
+      distress_classification: "High Vocal Distress",
+      status: "ACTIVE",
+      nearest_police_station: "Central Police Station",
+    };
+    const testTargets = [
+      {
+        device_id: "DEV-TEST-TARGET",
+        user_id: "USER-RECIPIENT",
+        fcm_token: "mock_recipient_token_1234567890",
+        distanceKm: 0.42,
+      },
+    ];
+
+    const dispatchRes = await dispatchProximityPushNotifications(
+      testTargets,
+      testIncident,
+      async (tok) => { cleanedToken = tok; }
+    );
+    assert(dispatchRes.status === "LOCAL_DISPATCH_LOGGED_MOCK", "Truthfully reports LOCAL_DISPATCH_LOGGED_MOCK when service account missing");
+    assert(dispatchRes.isRealDelivery === false, "Truthfully reports isRealDelivery: false");
+    assert(dispatchRes.recipientsCount === 1, "Target device included in dispatch queue");
+    assert(dispatchRes.results[0].status === "RECORDED_IN_DISPATCH_QUEUE", "Recipient marked RECORDED_IN_DISPATCH_QUEUE");
+    console.log("  ✓ Proximity push dispatch contract verified with honest mock reporting");
+
     console.log("\n=================================================================");
-    console.log("  ALL 22 BACKEND ACCEPTANCE TESTS PASSED SUCCESSFULLY! (100%)");
+    console.log("  ALL 24 BACKEND ACCEPTANCE TESTS PASSED SUCCESSFULLY! (100%)");
     console.log("=================================================================\n");
+    process.exit(0);
   } catch (err) {
     console.error("Test execution failed with error:", err);
     process.exit(1);

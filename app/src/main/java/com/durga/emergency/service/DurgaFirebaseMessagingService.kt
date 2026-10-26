@@ -83,7 +83,8 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
 
         // 1. Deduplication guard
-        val messageId = remoteMessage.messageId ?: (remoteMessage.data["eventId"] ?: System.currentTimeMillis().toString())
+        val eventIdRaw = remoteMessage.data["eventId"] ?: remoteMessage.data["incidentId"]
+        val messageId = remoteMessage.messageId ?: eventIdRaw ?: System.currentTimeMillis().toString()
         if (processedMessageIds.contains(messageId)) {
             Log.d(TAG, "Ignored duplicate FCM message: $messageId")
             return
@@ -97,33 +98,44 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // 3. Inspect payload data
-        val type = remoteMessage.data["type"] ?: "DURGA_EMERGENCY"
-        val eventId = remoteMessage.data["eventId"] ?: ""
+        // 3. Inspect payload data with backward/forward compatibility using parser
+        val parsed = com.durga.emergency.utils.NotificationPayloadParser.parse(
+            data = remoteMessage.data,
+            notificationTitle = remoteMessage.notification?.title,
+            notificationBody = remoteMessage.notification?.body
+        )
 
-        val title = remoteMessage.notification?.title
-            ?: remoteMessage.data["title"]
-            ?: if (type == "DURGA_TEST") "DURGA Test Notification" else "🚨 DURGA EMERGENCY ALERT"
-
-        val body = remoteMessage.notification?.body
-            ?: remoteMessage.data["body"]
-            ?: if (type == "DURGA_TEST") "Internet notification test received." else "Distress detected. Tap to inspect telemetry."
-
-        val isTestNotification = (type == "DURGA_TEST")
-
-        sendNotification(title, body, eventId, isTestNotification)
+        sendNotification(parsed, remoteMessage.data)
     }
 
-    private fun sendNotification(title: String, body: String, eventId: String, isTest: Boolean) {
+    private fun sendNotification(
+        parsed: com.durga.emergency.utils.ParsedNotification,
+        dataPayload: Map<String, String> = emptyMap()
+    ) {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("EXTRA_EVENT_ID", eventId)
-            putExtra("EXTRA_IS_TEST_NOTIFICATION", isTest)
+            putExtra("EXTRA_EVENT_ID", parsed.eventId)
+            putExtra("EXTRA_INCIDENT_ID", parsed.eventId)
+            putExtra("EXTRA_IS_TEST_NOTIFICATION", parsed.isTest)
+            putExtra("EXTRA_NOTIFICATION_TYPE", parsed.type)
+            if (parsed.latitude != null) putExtra("EXTRA_LATITUDE", parsed.latitude)
+            if (parsed.longitude != null) putExtra("EXTRA_LONGITUDE", parsed.longitude)
+            if (parsed.accuracy != null) putExtra("EXTRA_ACCURACY", parsed.accuracy)
+            putExtra("EXTRA_DISTRESS_SCORE", parsed.distressScore)
+            putExtra("EXTRA_CLASSIFICATION", parsed.classification)
+            putExtra("EXTRA_NEAREST_STATION", parsed.nearestStation)
+            if (parsed.distanceKm != null) putExtra("EXTRA_DISTANCE_KM", parsed.distanceKm)
+            putExtra("EXTRA_STATUS", parsed.status)
+            putExtra("EXTRA_ALERT_TITLE", parsed.title)
+            putExtra("EXTRA_ALERT_BODY", parsed.body)
+            for ((key, value) in dataPayload) {
+                putExtra(key, value)
+            }
         }
 
         val pendingIntent = PendingIntent.getActivity(
             this,
-            if (isTest) 1001 else 1002,
+            if (parsed.isTest) 1001 else 1002,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -149,22 +161,22 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         val alarmSound = RingtoneManager.getDefaultUri(
-            if (isTest) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
+            if (parsed.isTest) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
         )
 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_shield)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentTitle(parsed.title)
+            .setContentText(parsed.body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(parsed.body))
             .setAutoCancel(true)
             .setSound(alarmSound)
-            .setVibrate(if (isTest) longArrayOf(0, 250, 150, 250) else longArrayOf(0, 500, 200, 500))
+            .setVibrate(if (parsed.isTest) longArrayOf(0, 250, 150, 250) else longArrayOf(0, 500, 200, 500))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
 
-        val notificationId = if (isTest) 9999 else (System.currentTimeMillis() % 100000).toInt()
+        val notificationId = if (parsed.isTest) 9999 else (System.currentTimeMillis() % 100000).toInt()
         notificationManager.notify(notificationId, notificationBuilder.build())
-        Log.i(TAG, "Displayed notification (isTest=$isTest, id=$notificationId): $title")
+        Log.i(TAG, "Displayed notification (isTest=${parsed.isTest}, id=$notificationId): ${parsed.title}")
     }
 }

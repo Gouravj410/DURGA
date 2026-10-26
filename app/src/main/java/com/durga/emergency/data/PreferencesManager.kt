@@ -68,7 +68,14 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putString(KEY_SECURITY_PIN, value).apply()
 
     var serverBaseUrl: String
-        get() = prefs.getString(KEY_SERVER_BASE_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+        get() {
+            val stored = prefs.getString(KEY_SERVER_BASE_URL, null)
+            return if (stored.isNullOrEmpty() || stored.contains(".lhr.life")) {
+                DEFAULT_SERVER_URL
+            } else {
+                stored
+            }
+        }
         set(value) = prefs.edit().putString(KEY_SERVER_BASE_URL, value).apply()
 
     var selectedRole: UserRole
@@ -104,6 +111,8 @@ class PreferencesManager(context: Context) {
         prefs.edit()
             .remove(KEY_AUTH_TOKEN)
             .remove(KEY_IS_LOGGED_IN)
+            .remove(KEY_USER_ID)
+            .remove(KEY_FCM_TOKEN)
             .apply()
     }
 }

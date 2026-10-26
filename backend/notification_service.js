@@ -58,30 +58,35 @@ try {
  * @param {Array<{fcm_token: string, device_id: string, user_id: string, distanceKm: number}>} targetDevices
  * @param {Object} incident
  */
-async function dispatchProximityPushNotifications(targetDevices, incident) {
+async function dispatchProximityPushNotifications(targetDevices, incident, onInvalidTokenCallback = null) {
   if (!targetDevices || targetDevices.length === 0) {
     return {
       status: "NO_TARGETS_IN_RADIUS",
       recipientsCount: 0,
+      isRealDelivery: Boolean(fcmInitialized),
       results: [],
     };
   }
 
   const results = [];
+  const eventIdentifier = String(incident.id || "");
 
   for (const device of targetDevices) {
     const payload = {
       title: "🚨 DURGA EMERGENCY ALERT",
       body: `Citizen in distress ~${device.distanceKm} km away. Tap to inspect telemetry & view walking route.`,
       data: {
-        incidentId: String(incident.id),
-        userName: String(incident.user_name || "Protected Citizen"),
+        eventId: eventIdentifier,
+        incidentId: eventIdentifier,
+        type: "DURGA_EMERGENCY",
         latitude: String(incident.latitude || "0.0"),
         longitude: String(incident.longitude || "0.0"),
+        locationAccuracy: String(incident.location_accuracy || "10.0"),
         distressScore: String(incident.distress_score || "0.0"),
-        status: String(incident.status),
+        distressClassification: String(incident.distress_classification || "Distress Detected"),
+        status: String(incident.status || "ACTIVE"),
         nearestStation: String(incident.nearest_police_station || ""),
-        distanceKm: String(device.distanceKm),
+        distanceKm: String(device.distanceKm || "0.0"),
         timestamp: String(Date.now()),
       },
     };
@@ -113,16 +118,29 @@ async function dispatchProximityPushNotifications(targetDevices, incident) {
           userId: device.user_id,
           token: device.fcm_token.substring(0, 10) + "...",
           status: "FCM_SUBMISSION_ACCEPTED",
+          isRealDelivery: true,
           messageId: response,
           distanceKm: device.distanceKm,
         });
         console.log(`[DURGA FCM] Sent alert to user ${device.user_id} (${device.distanceKm} km): ${response}`);
       } catch (err) {
         console.error(`[DURGA FCM] Failed to send to token ${device.fcm_token.substring(0, 10)}:`, err.message);
+        if (
+          (err.code === "messaging/invalid-registration-token" ||
+            err.code === "messaging/registration-token-not-registered") &&
+          onInvalidTokenCallback
+        ) {
+          try {
+            await onInvalidTokenCallback(device.fcm_token);
+          } catch (cleanErr) {
+            console.error("[DURGA FCM] Error cleaning invalid token:", cleanErr.message);
+          }
+        }
         results.push({
           deviceId: device.device_id,
           userId: device.user_id,
           status: "PROVIDER_REJECTED",
+          isRealDelivery: false,
           error: err.message,
           distanceKm: device.distanceKm,
         });
@@ -134,7 +152,8 @@ async function dispatchProximityPushNotifications(targetDevices, incident) {
         userId: device.user_id,
         token: device.fcm_token ? device.fcm_token.substring(0, 10) + "..." : "NONE",
         status: "RECORDED_IN_DISPATCH_QUEUE",
-        note: "Backend accepted & targeted within 1km radius (Local prototype mode)",
+        isRealDelivery: false,
+        note: "Backend accepted & targeted within 1km radius (Development audit mode: Firebase service account not configured)",
         distanceKm: device.distanceKm,
       });
       console.log(
@@ -144,7 +163,8 @@ async function dispatchProximityPushNotifications(targetDevices, incident) {
   }
 
   return {
-    status: fcmInitialized ? "FCM_DISPATCHED" : "LOCAL_DISPATCH_LOGGED",
+    status: fcmInitialized ? "FCM_DISPATCHED" : "LOCAL_DISPATCH_LOGGED_MOCK",
+    isRealDelivery: Boolean(fcmInitialized),
     recipientsCount: results.length,
     results,
   };
@@ -167,6 +187,7 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
   const payload = {
     type: "DURGA_TEST",
     eventId,
+    incidentId: eventId,
     title,
     body,
     senderId: String(senderUser.userId || senderUser.id || "UNKNOWN"),
@@ -199,9 +220,11 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
       return {
         success: true,
         status: "FCM_SUBMISSION_ACCEPTED",
+        isRealDelivery: true,
         messageId,
         recipientUserId: targetDevice.user_id,
         eventId,
+        incidentId: eventId,
       };
     } catch (err) {
       console.error(`[DURGA FCM TEST] Error sending to token ${targetDevice.fcm_token.substring(0, 10)}:`, err.message);
@@ -221,18 +244,22 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
         return {
           success: false,
           status: "TOKEN_UNREGISTERED_OR_INVALID",
+          isRealDelivery: false,
           error: "Recipient token is expired or unregistered.",
           recipientUserId: targetDevice.user_id,
           eventId,
+          incidentId: eventId,
         };
       }
 
       return {
         success: false,
         status: "FCM_ERROR",
+        isRealDelivery: false,
         error: err.message,
         recipientUserId: targetDevice.user_id,
         eventId,
+        incidentId: eventId,
       };
     }
   }
@@ -242,16 +269,47 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
   return {
     success: true,
     status: "DEVELOPMENT_MOCK_DISPATCH_RECORDED",
+    isRealDelivery: false,
     messageId: `dev-msg-${crypto.randomUUID().substring(0, 8)}`,
     recipientUserId: targetDevice.user_id,
     eventId,
-    note: "Backend authenticated request and validated FCM message payload. (Service account key required for live transport)",
+    incidentId: eventId,
+    note: "Push delivery mocked: Firebase Admin credentials not configured on backend. (serviceAccountKey.json required for real FCM transport)",
+  };
+}
+
+/**
+ * Validates and normalizes incoming notification payload data.
+ * Guarantees that both eventId and incidentId can be extracted safely.
+ */
+function parseNotificationPayload(data) {
+  if (!data || typeof data !== "object") {
+    return {
+      eventId: null,
+      incidentId: null,
+      type: "UNKNOWN",
+      isValid: false,
+      error: "Malformed or missing notification payload",
+    };
+  }
+  const eventId = data.eventId || data.incidentId || null;
+  const incidentId = data.incidentId || data.eventId || null;
+  const type = data.type || (eventId && eventId.startsWith("TEST-") ? "DURGA_TEST" : "DURGA_EMERGENCY");
+
+  return {
+    eventId,
+    incidentId,
+    type,
+    isValid: Boolean(eventId),
+    isTest: type === "DURGA_TEST",
+    data,
   };
 }
 
 module.exports = {
   dispatchProximityPushNotifications,
   sendTestPushNotification,
+  parseNotificationPayload,
   isFcmConfigured: () => fcmInitialized,
   getServiceAccountPath: () => SERVICE_ACCOUNT_PATH,
 };

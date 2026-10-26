@@ -310,7 +310,13 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
       status: "ACTIVE",
       nearest_police_station: stationName,
     };
-    const pushResult = await dispatchProximityPushNotifications(eligibleRecipients, incidentObj);
+    const pushResult = await dispatchProximityPushNotifications(
+      eligibleRecipients,
+      incidentObj,
+      async (invalidToken) => {
+        await runQuery("UPDATE devices SET fcm_token = NULL WHERE fcm_token = ?", [invalidToken]);
+      }
+    );
 
     // 5. Audit Log Entry
     await writeAuditLog(
