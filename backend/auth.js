@@ -94,6 +94,9 @@ async function verifyOtp(phone, otp, defaultName = "Citizen", defaultRole = "CIT
       [userId, cleanPhone, defaultName, defaultRole, now]
     );
     user = await getQuery("SELECT * FROM users WHERE id = ?", [userId]);
+  } else if (defaultName && defaultName !== "Protected Citizen" && defaultName !== "Citizen" && defaultName !== user.name) {
+    await runQuery("UPDATE users SET name = ? WHERE id = ?", [defaultName, user.id]);
+    user.name = defaultName;
   }
 
   // Issue JWT Token

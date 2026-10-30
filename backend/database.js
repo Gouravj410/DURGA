@@ -47,6 +47,11 @@ function initSchema() {
         created_at INTEGER NOT NULL
       )
     `);
+    // Idempotent migration for citizen profile attributes
+    db.run("ALTER TABLE users ADD COLUMN emergency_contact_name TEXT", () => {});
+    db.run("ALTER TABLE users ADD COLUMN emergency_contact_phone TEXT", () => {});
+    db.run("ALTER TABLE users ADD COLUMN blood_group TEXT", () => {});
+    db.run("ALTER TABLE users ADD COLUMN home_address TEXT", () => {});
 
     // 2. Devices Table (FCM Tokens & Last Known Coordinates)
     db.run(`
@@ -59,10 +64,13 @@ function initSchema() {
         last_lon REAL,
         last_accuracy REAL,
         last_location_time INTEGER,
+        is_opted_in INTEGER DEFAULT 1,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+    // Idempotent migration for existing database files
+    db.run("ALTER TABLE devices ADD COLUMN is_opted_in INTEGER DEFAULT 1", () => {});
 
     // 3. Incidents Table (Full Lifecycle State Machine)
     db.run(`
@@ -81,6 +89,7 @@ function initSchema() {
         audio_file_path TEXT,
         nearest_police_station TEXT,
         nearest_police_station_distance REAL,
+        trigger_device_id TEXT,
         resolved_by_responder_id TEXT,
         resolution_notes TEXT,
         created_at INTEGER NOT NULL,
@@ -89,6 +98,8 @@ function initSchema() {
         FOREIGN KEY(user_id) REFERENCES users(id)
       )
     `);
+    // Idempotent migration for trigger_device_id on incidents
+    db.run("ALTER TABLE incidents ADD COLUMN trigger_device_id TEXT", () => {});
 
     // 4. Incident Real-Time Location History
     db.run(`
@@ -140,8 +151,53 @@ function initSchema() {
       )
     `);
 
-    // Pre-populate verified Pune Police Stations
+    // Verified Police Stations Directory (Virar, Vasai, Mumbai & Pune)
     const stations = [
+      {
+        id: "PS-VIRAR-01",
+        name: "Virar Police Station (MBVV)",
+        lat: 19.4580,
+        lon: 72.8090,
+        phone: "+91-250-2522333",
+        address: "Station Road, Virar West, Palghar, Maharashtra 401303",
+        verified: "2026-02-01",
+      },
+      {
+        id: "PS-VIRAR-02",
+        name: "Bolinj Police Station",
+        lat: 19.4678,
+        lon: 72.8015,
+        phone: "+91-250-2525100",
+        address: "Agashi-Bolinj Road, Virar West, Maharashtra 401303",
+        verified: "2026-02-01",
+      },
+      {
+        id: "PS-VIRAR-03",
+        name: "Arnala Coastal Police Station",
+        lat: 19.4475,
+        lon: 72.7682,
+        phone: "+91-250-2587100",
+        address: "Arnala Coastal Belt, Virar West, Maharashtra 401302",
+        verified: "2026-02-01",
+      },
+      {
+        id: "PS-VASAI-01",
+        name: "Vasai Police Station",
+        lat: 19.3644,
+        lon: 72.8122,
+        phone: "+91-250-2322333",
+        address: "Court Road, Vasai West, Palghar, Maharashtra 401201",
+        verified: "2026-02-01",
+      },
+      {
+        id: "PS-NALA-01",
+        name: "Nalasopara Police Station",
+        lat: 19.4180,
+        lon: 72.8210,
+        phone: "+91-250-2402333",
+        address: "Near Railway Station, Nalasopara West, Maharashtra 401203",
+        verified: "2026-02-01",
+      },
       {
         id: "PS-001",
         name: "Central Police Station (Shivajinagar)",

@@ -1,25 +1,28 @@
 /**
  * DURGA Tunnel Activity Heartbeat Keeper
- * Periodically issues genuine HTTP GET requests through the public reverse proxy tunnel
- * to prevent the remote edge gateway from timing out due to zero traffic (tunnel activity timeout).
+ * Periodically issues HTTP/HTTPS GET requests through a configured reverse proxy tunnel
+ * or local endpoint to maintain gateway activity and monitor uptime.
  */
 
+const http = require("http");
 const https = require("https");
 
-const TUNNEL_URL = process.argv[2] || "https://ec06773af1c187.lhr.life/api/v1/ping";
-const INTERVAL_MS = 60 * 1000; // 60 seconds
+const rawUrl = process.argv[2] || process.env.DURGA_TUNNEL_URL || "http://localhost:3000/api/v1/ping";
+const TUNNEL_URL = rawUrl.endsWith("/ping") ? rawUrl : `${rawUrl.replace(/\/+$/, "")}/ping`;
+const INTERVAL_MS = parseInt(process.env.DURGA_KEEPALIVE_INTERVAL_MS, 10) || 60 * 1000; // 60s
 
 console.log(`[TUNNEL KEEPALIVE] Monitoring active endpoint: ${TUNNEL_URL}`);
 
 function sendHeartbeat() {
   try {
-    const req = https.get(TUNNEL_URL, (res) => {
+    const client = TUNNEL_URL.startsWith("https") ? https : http;
+    const req = client.get(TUNNEL_URL, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
         const time = new Date().toLocaleTimeString();
         if (res.statusCode === 200) {
-          console.log(`[${time}] Heartbeat SUCCESS (HTTP 200) - Tunnel active`);
+          console.log(`[${time}] Heartbeat SUCCESS (HTTP 200) - Endpoint active`);
         } else {
           console.warn(`[${time}] Heartbeat WARN (HTTP ${res.statusCode})`);
         }
@@ -41,4 +44,13 @@ function sendHeartbeat() {
 
 // Initial ping + interval
 sendHeartbeat();
-setInterval(sendHeartbeat, INTERVAL_MS);
+const timer = setInterval(sendHeartbeat, INTERVAL_MS);
+
+process.on("SIGINT", () => {
+  clearInterval(timer);
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  clearInterval(timer);
+  process.exit(0);
+});

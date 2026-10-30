@@ -302,7 +302,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="• Foreground App: 🟢 Full Support\nBoth motion shake sequences and touch pattern templates are recognized with immediate response.\n\n• Background (Foreground Service): 🟡 Motion Shake Supported\nContinuous accelerometer monitoring requires the persistent notification service. Subject to OEM aggressive battery management and Doze restrictions.\n\n• System Lock-Screen: 🟠 Motion Shake Only\nAndroid 10+ restricts arbitrary touch capture across system lock screens for privacy and security. Touch patterns operate only within the DURGA app. For 100% reliable lock-screen emergency activation, use the persistent notification 'TRIGGER SOS' action button."
+                        android:text="[ACTIVE APPLICATION CONTEXT]\n• Full Real-time Support: Both high-G motion shake sequences and touch vector patterns are monitored with immediate sub-100ms response.\n\n[BACKGROUND DEFENSE SERVICE]\n• Continuous Sensor Polling: Background service maintains active accelerometer monitoring. Protected by system foreground notification.\n\n[SECURE LOCK-SCREEN ENVIRONMENT]\n• Hardware Accelerometer Only: Android security policies restrict custom touch pattern capture while the device is locked. Motion shake triggers directly from pocket or lock-screen. For 100% reliable tactile dispatch on locked devices, use the persistent notification 'ACTIVATE SOS' action."
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp"
                         android:lineSpacingExtra="3dp" />

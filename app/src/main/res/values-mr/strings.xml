@@ -57,8 +57,8 @@
     <string name="notif_channel_name">दुर्गा आणीबाणी अलर्ट</string>
     <string name="notif_channel_desc">१ किमीच्या आतील जीवन-सुरक्षा घटनांसाठी उच्च-प्राधान्य सूचना.</string>
     <string name="notif_service_title">दुर्गा सुरक्षा मॉनिटर सक्रिय</string>
-    <string name="notif_service_action_sos">🔴 SOS साठी टॅप करा</string>
-    <string name="notif_alert_title">🚨 दुर्गा आणीबाणी अलर्ट</string>
+    <string name="notif_service_action_sos">SOS सक्रिय करा</string>
+    <string name="notif_alert_title">दुर्गा आणीबाणी अलर्ट</string>
     <string name="notif_alert_body">%1$s अंतरावर नागरिक संकटात असल्याचे आढळले. स्थान पाहण्यासाठी टॅप करा.</string>
 
     <!-- Error States -->

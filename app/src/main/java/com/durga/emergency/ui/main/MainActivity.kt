@@ -5,16 +5,23 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorManager
-import android.media.Ringtone
-import android.media.RingtoneManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.app.KeyguardManager
+import android.os.CountDownTimer
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,9 +45,10 @@ import com.durga.emergency.ui.login.LoginActivity
 import com.durga.emergency.ui.gesture.GestureSettingsActivity
 import androidx.lifecycle.lifecycleScope
 import com.durga.emergency.data.api.DurgaApiClient
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class MainActivity : AppCompatActivity() {
 
@@ -57,8 +65,11 @@ class MainActivity : AppCompatActivity() {
     private var customGestureDetector: CustomGestureDetector? = null
     private lateinit var audioPlayer: DurgaAudioPlayer
 
-    private var alarmRingtone: Ringtone? = null
+    private var proximityMediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var preAlarmTimer: CountDownTimer? = null
+    private var lastAlarmedIncidentId: String? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -74,7 +85,7 @@ class MainActivity : AppCompatActivity() {
         if (fineLocation && recordAudio && postNotifications) {
             Toast.makeText(this, "Permissions active: Location, Audio & Push Alerts ready", Toast.LENGTH_SHORT).show()
         } else if (!postNotifications && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Toast.makeText(this, "⚠️ Notification permission denied. Background alerts will not appear on lock screen.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Notification permission denied. Background alerts will not appear on lock screen.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -94,6 +105,22 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Wake screen and display pre-alarm interface if device is locked
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            km?.requestDismissKeyguard(this, null)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+
         audioPlayer = DurgaAudioPlayer(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
@@ -101,6 +128,7 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
         observeViewModel()
         requestAppPermissions()
+        setupNetworkMonitoring()
 
         // Start Persistent Background Notification Trigger (Android 10-14 compliant)
         DurgaSafetyService.startService(this)
@@ -121,8 +149,7 @@ class MainActivity : AppCompatActivity() {
         if (intent == null) return
 
         if (intent.action == DurgaSafetyService.ACTION_TRIGGER_SOS) {
-            Toast.makeText(this, "🔴 Lock-Screen / Notification SOS Triggered!", Toast.LENGTH_LONG).show()
-            viewModel.triggerEmergency(TriggerSource.PERSISTENT_NOTIFICATION_ACTION)
+            startPreAlarmCountdown(TriggerSource.PERSISTENT_NOTIFICATION_ACTION)
             return
         }
 
@@ -157,8 +184,8 @@ class MainActivity : AppCompatActivity() {
             lastHandledNotificationTimestamp = now
 
             MaterialAlertDialogBuilder(this)
-                .setTitle("✅ Internet Push Notification Verified")
-                .setMessage("Successfully received and opened DURGA Internet Test Notification.\n\nEvent ID: ${eventId.ifEmpty { "TEST-FCM-VERIFIED" }}\nTransport: Firebase Cloud Messaging (FCM HTTP v1)")
+                .setTitle("Push Notification Verified")
+                .setMessage("Successfully received and opened DURGA Internet Push Notification.\n\nIncident ID: ${eventId.ifEmpty { "TEST-FCM-VERIFIED" }}\nTransport: Firebase Cloud Messaging (FCM HTTP v1)")
                 .setPositiveButton("OK", null)
                 .show()
             return
@@ -183,23 +210,31 @@ class MainActivity : AppCompatActivity() {
             lastHandledNotificationTimestamp = now
 
             // Extract telemetry extras safely
-            val latStr = intent.getStringExtra("EXTRA_LATITUDE")
+            val latStr = intent.getStringExtra("EXTRA_LATITUDE") ?: intent.getStringExtra("latitude")
             val lat = latStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_LATITUDE")) intent.getDoubleExtra("EXTRA_LATITUDE", 0.0).takeIf { it != 0.0 } else null
 
-            val lonStr = intent.getStringExtra("EXTRA_LONGITUDE")
+            val lonStr = intent.getStringExtra("EXTRA_LONGITUDE") ?: intent.getStringExtra("longitude")
             val lon = lonStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_LONGITUDE")) intent.getDoubleExtra("EXTRA_LONGITUDE", 0.0).takeIf { it != 0.0 } else null
 
-            val accuracyStr = intent.getStringExtra("EXTRA_ACCURACY")
+            val accuracyStr = intent.getStringExtra("EXTRA_ACCURACY") ?: intent.getStringExtra("accuracy") ?: intent.getStringExtra("locationAccuracy")
             val accuracy = accuracyStr?.toFloatOrNull() ?: if (intent.hasExtra("EXTRA_ACCURACY")) intent.getFloatExtra("EXTRA_ACCURACY", 15.0f) else null
 
-            val scoreStr = intent.getStringExtra("EXTRA_DISTRESS_SCORE")
+            val scoreStr = intent.getStringExtra("EXTRA_DISTRESS_SCORE") ?: intent.getStringExtra("distressScore")
             val distressScore = scoreStr?.toFloatOrNull() ?: if (intent.hasExtra("EXTRA_DISTRESS_SCORE")) intent.getFloatExtra("EXTRA_DISTRESS_SCORE", 0.95f) else 0.95f
 
-            val classification = intent.getStringExtra("EXTRA_CLASSIFICATION") ?: "Acoustic Distress Confirmed"
-            val nearestStation = intent.getStringExtra("EXTRA_NEAREST_STATION") ?: "Nearest Police Station"
-            val distStr = intent.getStringExtra("EXTRA_DISTANCE_KM")
+            val classification = intent.getStringExtra("EXTRA_CLASSIFICATION")
+                ?: intent.getStringExtra("distressClassification")
+                ?: intent.getStringExtra("classification")
+                ?: "Acoustic Distress Confirmed"
+
+            val nearestStation = intent.getStringExtra("EXTRA_NEAREST_STATION")
+                ?: intent.getStringExtra("nearestStation")
+                ?: intent.getStringExtra("nearestPoliceStation")
+                ?: "Nearest Police Station"
+
+            val distStr = intent.getStringExtra("EXTRA_DISTANCE_KM") ?: intent.getStringExtra("distanceKm")
             val distanceKm = distStr?.toDoubleOrNull() ?: if (intent.hasExtra("EXTRA_DISTANCE_KM")) intent.getDoubleExtra("EXTRA_DISTANCE_KM", 0.05) else 0.05
-            val status = intent.getStringExtra("EXTRA_STATUS") ?: "ACTIVE"
+            val status = intent.getStringExtra("EXTRA_STATUS") ?: intent.getStringExtra("status") ?: "ACTIVE"
 
             viewModel.onEmergencyNotificationTapped(
                 eventId = eventId,
@@ -215,7 +250,7 @@ class MainActivity : AppCompatActivity() {
 
             Toast.makeText(
                 this,
-                "🚨 Emergency Incident #$eventId Opened",
+                "Emergency Incident #$eventId Loaded",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -231,12 +266,7 @@ class MainActivity : AppCompatActivity() {
             config = primary,
             onGestureMatched = { matchedConfig, confidence ->
                 runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        "🚨 SOS Triggered: ${matchedConfig.name} (${(confidence * 100).toInt()}% confidence)",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    viewModel.triggerEmergency(TriggerSource.IN_APP_SHAKE_GESTURE)
+                    startPreAlarmCountdown(TriggerSource.IN_APP_SHAKE_GESTURE)
                 }
             }
         )
@@ -247,6 +277,7 @@ class MainActivity : AppCompatActivity() {
         if (::gestureRepo.isInitialized) {
             val primary = gestureRepo.getPrimaryGesture()
             customGestureDetector?.config = primary
+            customGestureDetector?.reset()
 
             if (gestureRepo.isGestureActivationEnabled && primary.type == GestureType.MOTION_SHAKE_SEQUENCE) {
                 accelerometer?.let {
@@ -259,6 +290,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(customGestureDetector)
+        customGestureDetector?.reset()
     }
 
     private fun setupListeners() {
@@ -283,9 +315,13 @@ class MainActivity : AppCompatActivity() {
             showPinCancellationDialog()
         }
 
-        // Fallback Cancellation during initial countdown
+        // Fallback Cancellation during initial countdown or Pre-Alarm grace
         binding.btnCancelEmergency.setOnClickListener {
-            showPinCancellationDialog()
+            if (preAlarmTimer != null) {
+                cancelPreAlarmGrace()
+            } else {
+                showPinCancellationDialog()
+            }
         }
 
         // "Are you safe?" Prompt Controls
@@ -320,9 +356,10 @@ class MainActivity : AppCompatActivity() {
 
         // Proximity Alert Dismiss
         binding.btnProximityDismiss.setOnClickListener {
+            val currentId = viewModel.nearbyMeshAlertEvent.value?.eventId
             stopProximityAlarm()
             binding.cardProximityAlert.visibility = View.GONE
-            viewModel.dismissProximityAlert()
+            viewModel.dismissProximityAlert(currentId)
             Toast.makeText(this, "Proximity alert silenced", Toast.LENGTH_SHORT).show()
         }
     }
@@ -374,7 +411,7 @@ class MainActivity : AppCompatActivity() {
             IncidentState.IDLE -> {
                 binding.tvStatusTitle.text = getString(R.string.status_protected)
                 binding.tvStatusTitle.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
-                binding.tvStatusSubtitle.text = "Sensors active: In-app gesture, persistent SOS & manual ready"
+                binding.tvStatusSubtitle.text = "Sensors armed: Acoustic AI guard & rapid gesture trigger active"
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_green_safe))
 
                 binding.layoutCountdown.visibility = View.GONE
@@ -385,23 +422,24 @@ class MainActivity : AppCompatActivity() {
 
             IncidentState.TRIGGERED -> {
                 binding.tvStatusTitle.text = getString(R.string.status_triggered)
-                binding.tvStatusSubtitle.text = "Activating acoustic capture & safety verification..."
+                binding.tvStatusSubtitle.text = "Initiating distress capture & acoustic verification..."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
             }
 
             IncidentState.RECORDING -> {
                 binding.tvStatusTitle.text = getString(R.string.status_recording)
+                binding.tvStatusSubtitle.text = "Capturing 5-second acoustic distress evidence..."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
             }
 
             IncidentState.ANALYZING -> {
                 binding.tvStatusTitle.text = getString(R.string.status_analyzing)
-                binding.tvStatusSubtitle.text = "Evaluating RMS energy & peak transients..."
+                binding.tvStatusSubtitle.text = "Evaluating acoustic spectrum for threat indicators..."
             }
 
             IncidentState.VERIFYING -> {
                 binding.tvStatusTitle.text = getString(R.string.status_verifying)
-                binding.tvStatusSubtitle.text = "Acoustic score uncertain. Confirm safety or request help."
+                binding.tvStatusSubtitle.text = "Acoustic score uncertain. Confirm safety or request immediate dispatch."
                 binding.cardAreYouSafe.visibility = View.VISIBLE
                 binding.layoutActiveIncidentActions.visibility = View.GONE
             }
@@ -409,7 +447,7 @@ class MainActivity : AppCompatActivity() {
             IncidentState.ESCALATING -> {
                 binding.cardAreYouSafe.visibility = View.GONE
                 binding.tvStatusTitle.text = getString(R.string.status_escalating)
-                binding.tvStatusSubtitle.text = "Acquiring high-accuracy GPS & querying 1 km radius..."
+                binding.tvStatusSubtitle.text = "Acquiring satellite GPS & dispatching alert to 1.0 km radius..."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_red_bright))
             }
 
@@ -422,7 +460,7 @@ class MainActivity : AppCompatActivity() {
 
                 binding.tvStatusTitle.text = getString(R.string.status_emergency)
                 binding.tvStatusTitle.setTextColor(ContextCompat.getColor(this, R.color.durga_red_bright))
-                binding.tvStatusSubtitle.text = "Incident live: Nearby citizens targeted & responders alerted."
+                binding.tvStatusSubtitle.text = "Emergency broadcast active: Nearby citizens and police alerted."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_red_bright))
             }
 
@@ -430,25 +468,25 @@ class MainActivity : AppCompatActivity() {
                 binding.cardAreYouSafe.visibility = View.GONE
                 binding.layoutActiveIncidentActions.visibility = View.VISIBLE
                 binding.btnRepeatSos.visibility = View.VISIBLE
-                binding.btnCancelWithPin.visibility = View.VISIBLE // UNIFIED POLICY: Cancellation enabled across all triggers
+                binding.btnCancelWithPin.visibility = View.VISIBLE
                 binding.tvRepeatSosLockWarning.visibility = View.GONE
 
                 binding.tvStatusTitle.text = getString(R.string.status_repeat_active)
                 binding.tvStatusTitle.setTextColor(ContextCompat.getColor(this, R.color.durga_red_bright))
-                binding.tvStatusSubtitle.text = "Repeat SOS re-notified. Responders alerted. Enter secret code to cancel."
+                binding.tvStatusSubtitle.text = "High-priority repeat SOS broadcasted. Enter PIN to cancel."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_red_primary))
             }
 
             IncidentState.ACKNOWLEDGED -> {
                 binding.tvStatusTitle.text = getString(R.string.status_acknowledged)
-                binding.tvStatusSubtitle.text = "Dispatcher acknowledged alert. Police unit coordinating."
+                binding.tvStatusSubtitle.text = "Dispatcher acknowledged alert. Police response unit coordinating."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
             }
 
             IncidentState.RESPONDING -> {
                 binding.tvStatusTitle.text = getString(R.string.status_responding)
                 binding.tvStatusSubtitle.text = "Police response unit en route to your coordinates."
-                binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_blue_accent))
+                binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_blue_bright))
             }
 
             IncidentState.RESOLVED -> {
@@ -471,7 +509,7 @@ class MainActivity : AppCompatActivity() {
 
                 binding.tvStatusTitle.text = getString(R.string.status_cancelled)
                 binding.tvStatusTitle.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
-                binding.tvStatusSubtitle.text = "Incident cancelled via PIN. User confirmed safe."
+                binding.tvStatusSubtitle.text = "Incident cancelled via PIN verification. User safe."
                 binding.viewStatusDot.setBackgroundColor(ContextCompat.getColor(this, R.color.durga_green_safe))
 
                 binding.root.postDelayed({
@@ -560,7 +598,12 @@ class MainActivity : AppCompatActivity() {
                 50
             }
             binding.tvProximityDistanceBadge.text = "~${distMeters}m AWAY"
-            binding.tvProximityVictimName.text = "🚨 ${event.userName} (${event.emergencyContactPhone})"
+            val victimLabel = if (event.emergencyContactPhone.isNotBlank() && event.emergencyContactPhone != "PROXIMITY_ALERT") {
+                "Distress Signal: ${event.userName} (${event.emergencyContactPhone})"
+            } else {
+                "Distress Signal: ${event.userName}"
+            }
+            binding.tvProximityVictimName.text = victimLabel
             binding.tvProximityAiStatus.text = "Acoustic AI: ${event.distressClassification} (${(event.distressScore * 100).toInt()}%)"
 
             // View Map navigation
@@ -586,25 +629,116 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
             }
 
-            // Trigger alarm sound and vibration
-            startProximityAlarm()
+            // Trigger alarm sound and vibration (only once per incident to prevent loops)
+            if (event.eventId != lastAlarmedIncidentId) {
+                lastAlarmedIncidentId = event.eventId
+                startProximityAlarm()
+            }
         } else {
             binding.cardProximityAlert.visibility = View.GONE
             stopProximityAlarm()
         }
     }
 
+    private fun startPreAlarmCountdown(source: TriggerSource) {
+        val currentState = viewModel.incidentState.value ?: IncidentState.IDLE
+        if (currentState != IncidentState.IDLE && currentState != IncidentState.CANCELLED && currentState != IncidentState.RESOLVED) {
+            // Already in active distress lifecycle
+            viewModel.triggerEmergency(source)
+            return
+        }
+
+        preAlarmTimer?.cancel()
+        binding.layoutCountdown.visibility = View.VISIBLE
+        binding.tvCountdownTitle.text = "EMERGENCY GESTURE DETECTED"
+        binding.tvCountdownSub.text = "Dispatching emergency alerts in 5 seconds... Tap Cancel if accidental."
+        binding.tvCountdownNumber.text = "5"
+
+        // Warning haptic feedback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(200)
+        }
+
+        preAlarmTimer = object : CountDownTimer(5000L, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val sec = (millisUntilFinished / 1000L) + 1
+                binding.tvCountdownNumber.text = "$sec"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(100)
+                }
+            }
+
+            override fun onFinish() {
+                binding.layoutCountdown.visibility = View.GONE
+                preAlarmTimer = null
+                Log.i("MainActivity", "Pre-alarm grace window elapsed. Initiating emergency dispatch from $source")
+                viewModel.triggerEmergency(source)
+            }
+        }.start()
+    }
+
+    private fun cancelPreAlarmGrace() {
+        if (preAlarmTimer != null) {
+            preAlarmTimer?.cancel()
+            preAlarmTimer = null
+            binding.layoutCountdown.visibility = View.GONE
+            customGestureDetector?.reset()
+            Toast.makeText(this, "Emergency trigger cancelled. False alarm prevented.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupNetworkMonitoring() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    Log.i("MainActivity", "Internet connection restored. Synchronizing backend session...")
+                    viewModel.ensureBackendSession()
+                    com.durga.emergency.utils.FcmTokenHelper.syncRegistrationToken(this@MainActivity)
+                    viewModel.startProximityMonitoring()
+                }
+            }
+
+            override fun onLost(network: Network) {
+                runOnUiThread {
+                    Log.w("MainActivity", "Internet connection lost.")
+                }
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, networkCallback!!)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Network monitoring registration note: ${e.message}")
+        }
+    }
+
     private fun startProximityAlarm() {
         try {
-            if (alarmRingtone == null) {
-                var alertUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                if (alertUri == null) {
-                    alertUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            if (proximityMediaPlayer == null) {
+                proximityMediaPlayer = MediaPlayer.create(applicationContext, R.raw.durga_emergency_siren).apply {
+                    isLooping = true
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .build()
+                        )
+                    }
                 }
-                alarmRingtone = RingtoneManager.getRingtone(applicationContext, alertUri)
             }
-            if (alarmRingtone?.isPlaying == false) {
-                alarmRingtone?.play()
+            if (proximityMediaPlayer?.isPlaying == false) {
+                proximityMediaPlayer?.start()
             }
 
             vibrator?.let { vib ->
@@ -616,15 +750,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            Log.w("MainActivity", "Proximity alarm note: ${e.message}")
+            Log.w("MainActivity", "Proximity siren note: ${e.message}")
         }
     }
 
     private fun stopProximityAlarm() {
         try {
-            if (alarmRingtone?.isPlaying == true) {
-                alarmRingtone?.stop()
+            if (proximityMediaPlayer?.isPlaying == true) {
+                proximityMediaPlayer?.stop()
             }
+            proximityMediaPlayer?.release()
+            proximityMediaPlayer = null
             vibrator?.cancel()
         } catch (e: Exception) {
             // ignore
@@ -633,24 +769,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAccountDialog() {
         val message = """
-            👤 Name: ${prefs.userName}
-            📱 Phone: ${prefs.userPhone}
-            🆔 User ID: ${prefs.userId}
-            🌐 Server: ${prefs.serverBaseUrl}
-            🔒 PIN: PBKDF2 Hashed
-            🛡️ Status: Protected Active Citizen
+            Citizen Identity: ${prefs.userName}
+            Registered Mobile: ${prefs.userPhone}
+            Citizen ID: ${prefs.userId}
+            Central Gateway: ${prefs.serverBaseUrl}
+            Security Verification: 4-Digit PBKDF2 Hashed PIN
+            Protection Status: Active Monitored Citizen
         """.trimIndent()
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("DURGA Account & Device Info")
+            .setTitle("Citizen Account & Security Profile")
             .setMessage(message)
-            .setPositiveButton("📡 Send Internet Test Push") { _, _ ->
+            .setPositiveButton("Verify Push Delivery") { _, _ ->
                 showSendTestNotificationDialog()
             }
-            .setNegativeButton("Log Out") { _, _ ->
+            .setNegativeButton("Sign Out") { _, _ ->
                 performLogout()
             }
-            .setNeutralButton("Switch Account") { _, _ ->
+            .setNeutralButton("Switch Identity") { _, _ ->
                 val intent = Intent(this, LoginActivity::class.java).apply {
                     putExtra("EXTRA_FORCE_RELOGIN", true)
                 }
@@ -661,32 +797,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun showSendTestNotificationDialog() {
         val input = EditText(this).apply {
-            hint = "Target phone (default: any nearby device)"
+            hint = "Target phone (default: nearby recipient)"
             setText("+918888888888")
             inputType = android.text.InputType.TYPE_CLASS_PHONE
         }
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Send Verified Internet Test Push")
-            .setMessage("This will trigger a real FCM test notification through the trusted backend to the recipient's phone.")
+            .setTitle("Dispatch Verification Push")
+            .setMessage("Transmit an authenticated diagnostic test alert through the secure gateway to verify push delivery.")
             .setView(input)
-            .setPositiveButton("SEND PUSH") { _, _ ->
+            .setPositiveButton("Send Diagnostic") { _, _ ->
                 val targetPhone = input.text.toString().trim()
-                Toast.makeText(this, "Dispatching test push request to backend...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Dispatching test push request...", Toast.LENGTH_SHORT).show()
 
                 lifecycleScope.launch {
                     val result = viewModel.sendTestPushNotification(targetPhone = targetPhone.ifEmpty { null })
                     if (result.isSuccess) {
                         val resp = result.getOrThrow()
                         val alertMsg = if (resp.status == "FCM_SUBMISSION_ACCEPTED") {
-                            "✅ FCM Push Accepted by Firebase!\nMessage ID: ${resp.messageId}\nRecipient: ${resp.recipientUserId}"
+                            "Push notification accepted by Firebase Cloud Messaging.\n\nMessage ID: ${resp.messageId}\nRecipient: ${resp.recipientUserId}"
                         } else {
-                            "ℹ️ Provider Status: ${resp.status}\nNote: ${resp.note ?: "Queued in backend dispatch"}\nRecipient: ${resp.recipientUserId ?: "Eligible Device"}"
+                            "Provider Status: ${resp.status}\nNote: ${resp.note ?: "Queued in backend dispatch"}\nRecipient: ${resp.recipientUserId ?: "Eligible Device"}"
                         }
                         MaterialAlertDialogBuilder(this@MainActivity)
-                            .setTitle("Test Push Result")
+                            .setTitle("Delivery Status")
                             .setMessage(alertMsg)
-                            .setPositiveButton("OK", null)
+                            .setPositiveButton("Dismiss", null)
                             .show()
                     } else {
                         Toast.makeText(this@MainActivity, "Failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
@@ -700,32 +836,44 @@ class MainActivity : AppCompatActivity() {
     private fun performLogout() {
         val deviceId = prefs.deviceId
         val fcmToken = prefs.fcmToken
-        val authToken = prefs.authToken
+        val currentAuthToken = prefs.authToken
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                if (!authToken.isNullOrEmpty()) {
-                    val apiClient = DurgaApiClient.getInstance(applicationContext)
-                    apiClient.revokeDeviceToken(deviceId, fcmToken)
-                    Log.i("MainActivity", "Backend device token revoked successfully on logout")
+                if (!currentAuthToken.isNullOrEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        val apiClient = DurgaApiClient.getInstance(applicationContext)
+                        apiClient.revokeDeviceToken(deviceId, fcmToken, currentAuthToken)
+                        Log.i("MainActivity", "Backend device token revoked successfully on logout")
+                    }
                 }
             } catch (e: Exception) {
                 Log.w("MainActivity", "Device token revocation on backend note: ${e.message}")
+            } finally {
+                prefs.clearSession()
+                val intent = Intent(this@MainActivity, LoginActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
+                finish()
             }
         }
-
-        prefs.clearSession()
-        val intent = Intent(this, LoginActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        startActivity(intent)
-        finish()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        preAlarmTimer?.cancel()
+        preAlarmTimer = null
         audioPlayer.stopAudio()
         stopProximityAlarm()
+        try {
+            networkCallback?.let {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                cm?.unregisterNetworkCallback(it)
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 }
 

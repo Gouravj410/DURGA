@@ -1,7 +1,12 @@
 package com.durga.emergency.ui.login
-
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -25,6 +30,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
     private lateinit var prefs: PreferencesManager
     private lateinit var apiClient: DurgaApiClient
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,12 +50,14 @@ class LoginActivity : AppCompatActivity() {
 
         initViews()
         setupListeners()
+        setupNetworkMonitoring()
+        autoTestServerConnection()
     }
 
     private fun initViews() {
-        binding.etName.setText(prefs.userName)
-        binding.etPhone.setText(prefs.userPhone)
-        binding.etPin.setText(prefs.securityPin)
+        if (prefs.userName.isNotEmpty()) binding.etName.setText(prefs.userName)
+        if (prefs.userPhone.isNotEmpty()) binding.etPhone.setText(prefs.userPhone)
+        if (prefs.securityPin.isNotEmpty()) binding.etPin.setText(prefs.securityPin)
         binding.etServerUrl.setText(prefs.serverBaseUrl)
     }
 
@@ -73,11 +81,11 @@ class LoginActivity : AppCompatActivity() {
 
                 binding.btnTestServer.isEnabled = true
                 if (isOnline) {
-                    binding.tvServerStatus.text = "🟢 Central Emergency Cloud Connected"
+                    binding.tvServerStatus.text = "Central Emergency Cloud Connected"
                     binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_green_safe))
-                    Toast.makeText(this@LoginActivity, "Central Emergency Cloud Online!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@LoginActivity, "Central Emergency Cloud Online", Toast.LENGTH_SHORT).show()
                 } else {
-                    binding.tvServerStatus.text = "🔴 Central Cloud Unreachable"
+                    binding.tvServerStatus.text = "Central Cloud Unreachable"
                     binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_red_bright))
                     Toast.makeText(
                         this@LoginActivity,
@@ -90,8 +98,9 @@ class LoginActivity : AppCompatActivity() {
 
         // Request OTP Button (Calls Central Backend)
         binding.btnRequestOtp.setOnClickListener {
-            val phone = binding.etPhone.text.toString().trim()
-            if (phone.length < 10) {
+            val rawPhone = binding.etPhone.text.toString().trim()
+            val digits = rawPhone.replace("[^0-9+]".toRegex(), "")
+            if (digits.replace("+", "").length < 10) {
                 Toast.makeText(this, "Please enter a valid 10-digit phone number", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -102,7 +111,7 @@ class LoginActivity : AppCompatActivity() {
                 apiClient.baseUrl = serverUrl
             }
 
-            val cleanPhone = if (!phone.startsWith("+") && phone.length == 10) "+91$phone" else phone
+            val cleanPhone = if (!digits.startsWith("+") && digits.length == 10) "+91$digits" else digits
             binding.btnRequestOtp.isEnabled = false
             binding.btnRequestOtp.text = "..."
 
@@ -114,12 +123,12 @@ class LoginActivity : AppCompatActivity() {
                 if (result.isSuccess) {
                     val testOtp = result.getOrNull()?.ifEmpty { "123456" } ?: "123456"
                     binding.etOtp.setText(testOtp)
-                    binding.tvOtpHint.text = "✅ Verification Code: $testOtp received"
+                    binding.tvOtpHint.text = "Verification Code: $testOtp received"
                     binding.tvOtpHint.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_green_safe))
                     Toast.makeText(this@LoginActivity, "OTP received: $testOtp", Toast.LENGTH_SHORT).show()
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Server unreachable"
-                    binding.tvOtpHint.text = "❌ Could not request OTP: $err"
+                    binding.tvOtpHint.text = "Could not request OTP: $err"
                     binding.tvOtpHint.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_red_bright))
                     Toast.makeText(this@LoginActivity, "Central server connection error. Verify API URL.", Toast.LENGTH_LONG).show()
                 }
@@ -129,12 +138,13 @@ class LoginActivity : AppCompatActivity() {
         // Main Login / Registration Submit (Central Backend Verification)
         binding.btnVerifyAndLogin.setOnClickListener {
             val name = binding.etName.text.toString().trim().ifEmpty { "Protected Citizen" }
-            val phone = binding.etPhone.text.toString().trim()
+            val rawPhone = binding.etPhone.text.toString().trim()
             val pin = binding.etPin.text.toString().trim()
             val otp = binding.etOtp.text.toString().trim()
             val serverUrl = binding.etServerUrl.text.toString().trim()
 
-            if (phone.length < 10) {
+            val digits = rawPhone.replace("[^0-9+]".toRegex(), "")
+            if (digits.replace("+", "").length < 10) {
                 Toast.makeText(this, "Please enter a valid 10-digit phone number", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -152,7 +162,7 @@ class LoginActivity : AppCompatActivity() {
                 apiClient.baseUrl = serverUrl
             }
 
-            val cleanPhone = if (!phone.startsWith("+") && phone.length == 10) "+91$phone" else phone
+            val cleanPhone = if (!digits.startsWith("+") && digits.length == 10) "+91$digits" else digits
 
             binding.btnVerifyAndLogin.isEnabled = false
             binding.btnVerifyAndLogin.text = "VERIFYING WITH CENTRAL CLOUD..."
@@ -169,21 +179,19 @@ class LoginActivity : AppCompatActivity() {
                     prefs.securityPin = pin
                     prefs.isLoggedIn = true
 
-                    // Sync security PIN and initial device registration to backend
+                    // Sync security PIN to backend asynchronously
                     launch(Dispatchers.IO) {
                         try {
-                            apiClient.setUserPin(pin)
-                            apiClient.registerDevice(
-                                fcmToken = prefs.fcmToken,
-                                deviceId = prefs.deviceId,
-                                latitude = null,
-                                longitude = null,
-                                accuracy = null
-                            )
+                            val pinResult = apiClient.setUserPin(pin)
+                            pinResult.onFailure { error ->
+                                Log.w("LoginActivity", "Failed to sync user PIN: ${error.message}")
+                            }
                         } catch (e: Exception) {
-                            // Non-fatal background sync
+                            Log.w("LoginActivity", "Non-fatal PIN sync error: ${e.message}")
                         }
                     }
+
+                    // Retrieve genuine FCM token and synchronize device registration with central backend
                     com.durga.emergency.utils.FcmTokenHelper.syncRegistrationToken(this@LoginActivity)
 
                     Toast.makeText(this@LoginActivity, "Welcome, $name! DURGA Cloud Active.", Toast.LENGTH_SHORT).show()
@@ -200,6 +208,62 @@ class LoginActivity : AppCompatActivity() {
                         .show()
                 }
             }
+        }
+    }
+
+    private fun setupNetworkMonitoring() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    autoTestServerConnection()
+                }
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, networkCallback!!)
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    private fun autoTestServerConnection() {
+        val currentUrl = binding.etServerUrl.text.toString().trim()
+        if (currentUrl.isNotEmpty()) {
+            prefs.serverBaseUrl = currentUrl
+            apiClient.baseUrl = currentUrl
+        }
+        binding.tvServerStatus.text = "Connecting..."
+        binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
+
+        lifecycleScope.launch {
+            val isOnline = withTimeoutOrNull(6000) {
+                apiClient.testConnection().getOrNull() == true
+            } ?: false
+
+            if (isOnline) {
+                binding.tvServerStatus.text = "Central Emergency Cloud Connected"
+                binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_green_safe))
+            } else {
+                binding.tvServerStatus.text = "Central Cloud Unreachable"
+                binding.tvServerStatus.setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.durga_red_bright))
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            networkCallback?.let {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                cm?.unregisterNetworkCallback(it)
+            }
+        } catch (e: Exception) {
+            // ignore
         }
     }
 

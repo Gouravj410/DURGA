@@ -57,8 +57,8 @@
     <string name="notif_channel_name">दुर्गा आपातकालीन अलर्ट</string>
     <string name="notif_channel_desc">1 किमी के भीतर जीवन-सुरक्षा घटनाओं के लिए उच्च-प्राथमिकता अलर्ट।</string>
     <string name="notif_service_title">दुर्गा सुरक्षा मॉनिटर सक्रिय</string>
-    <string name="notif_service_action_sos">🔴 SOS के लिए टैप करें</string>
-    <string name="notif_alert_title">🚨 दुर्गा आपातकालीन अलर्ट</string>
+    <string name="notif_service_action_sos">SOS सक्रिय करें</string>
+    <string name="notif_alert_title">दुर्गा आपातकालीन अलर्ट</string>
     <string name="notif_alert_body">%1$s दूर नागरिक संकट का पता चला। स्थान देखने के लिए टैप करें।</string>
 
     <!-- Error States -->

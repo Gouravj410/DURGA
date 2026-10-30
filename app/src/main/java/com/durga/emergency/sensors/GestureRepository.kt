@@ -42,12 +42,31 @@ class GestureRepository(context: Context) {
             return defaults
         }
 
-        return try {
+        val loaded = try {
             val type = object : TypeToken<List<GestureConfig>>() {}.type
             gson.fromJson<List<GestureConfig>>(json, type) ?: listOf(GestureConfig.createDefaultShake())
         } catch (e: Exception) {
             listOf(GestureConfig.createDefaultShake())
         }
+
+        // Migrate legacy raw thresholds to dynamic linear acceleration thresholds (>= 18.0 m/s^2)
+        var needsResave = false
+        val migrated = loaded.map { g ->
+            if (g.type == GestureType.MOTION_SHAKE_SEQUENCE && g.sensitivityThreshold < 18.0f) {
+                needsResave = true
+                g.copy(
+                    sensitivityThreshold = 18.0f,
+                    windowDurationMs = kotlin.math.max(2000L, g.windowDurationMs),
+                    cooldownDurationMs = kotlin.math.max(5000L, g.cooldownDurationMs)
+                )
+            } else {
+                g
+            }
+        }
+        if (needsResave) {
+            saveAllGestures(migrated)
+        }
+        return migrated
     }
 
     fun getPrimaryGesture(): GestureConfig {

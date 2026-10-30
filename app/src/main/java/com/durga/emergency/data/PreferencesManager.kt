@@ -25,8 +25,26 @@ class PreferencesManager(context: Context) {
         private const val KEY_FCM_TOKEN = "key_fcm_token"
         private const val KEY_DEVICE_ID = "key_device_id"
 
-        val DEFAULT_SERVER_URL: String = com.durga.emergency.BuildConfig.DEFAULT_BACKEND_URL
+        private const val KEY_LAST_LATITUDE = "key_last_latitude"
+        private const val KEY_LAST_LONGITUDE = "key_last_longitude"
+
+        const val PUBLIC_CLOUD_BACKEND_URL = "https://winds-baking-mambo-editors.trycloudflare.com/api/v1"
+        val DEFAULT_SERVER_URL: String = com.durga.emergency.BuildConfig.DEFAULT_BACKEND_URL.ifBlank { PUBLIC_CLOUD_BACKEND_URL }
     }
+
+    var lastKnownLatitude: Double?
+        get() = if (prefs.contains(KEY_LAST_LATITUDE)) prefs.getFloat(KEY_LAST_LATITUDE, 0f).toDouble() else null
+        set(value) {
+            if (value != null) prefs.edit().putFloat(KEY_LAST_LATITUDE, value.toFloat()).apply()
+            else prefs.edit().remove(KEY_LAST_LATITUDE).apply()
+        }
+
+    var lastKnownLongitude: Double?
+        get() = if (prefs.contains(KEY_LAST_LONGITUDE)) prefs.getFloat(KEY_LAST_LONGITUDE, 0f).toDouble() else null
+        set(value) {
+            if (value != null) prefs.edit().putFloat(KEY_LAST_LONGITUDE, value.toFloat()).apply()
+            else prefs.edit().remove(KEY_LAST_LONGITUDE).apply()
+        }
 
     var fcmToken: String?
         get() = prefs.getString(KEY_FCM_TOKEN, null)
@@ -70,10 +88,30 @@ class PreferencesManager(context: Context) {
     var serverBaseUrl: String
         get() {
             val stored = prefs.getString(KEY_SERVER_BASE_URL, null)
-            return if (stored.isNullOrEmpty() || stored.contains(".lhr.life")) {
-                DEFAULT_SERVER_URL
-            } else {
-                stored
+            val isEmulator = (android.os.Build.FINGERPRINT.startsWith("generic")
+                    || android.os.Build.FINGERPRINT.startsWith("unknown")
+                    || android.os.Build.MODEL.contains("google_sdk")
+                    || android.os.Build.MODEL.contains("Emulator")
+                    || android.os.Build.MODEL.contains("Android SDK built for x86"))
+
+            return when {
+                !isEmulator -> {
+                    // Physical hardware connects over public cloud tunnel
+                    if (stored.isNullOrEmpty()
+                        || stored.contains("10.0.2.2")
+                        || stored.contains("127.0.0.1")
+                        || stored.contains(".lhr.life")
+                        || stored.contains("pinggy")
+                        || stored.contains("loca.lt")
+                        || (stored.contains(".trycloudflare.com") && stored != PUBLIC_CLOUD_BACKEND_URL)) {
+                        prefs.edit().putString(KEY_SERVER_BASE_URL, PUBLIC_CLOUD_BACKEND_URL).apply()
+                        PUBLIC_CLOUD_BACKEND_URL
+                    } else {
+                        stored
+                    }
+                }
+                stored.isNullOrEmpty() -> DEFAULT_SERVER_URL
+                else -> stored
             }
         }
         set(value) = prefs.edit().putString(KEY_SERVER_BASE_URL, value).apply()

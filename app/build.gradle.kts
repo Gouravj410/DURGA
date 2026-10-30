@@ -16,7 +16,7 @@ android {
         versionName = "1.0.0"
 
         val defaultBackendUrl = project.findProperty("DURGA_BACKEND_URL") as? String
-            ?: "http://10.0.2.2:3000/api/v1"
+            ?: "https://winds-baking-mambo-editors.trycloudflare.com/api/v1"
         buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$defaultBackendUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

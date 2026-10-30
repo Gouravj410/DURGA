@@ -7,22 +7,42 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const { getMessaging } = require("firebase-admin/messaging");
 
 let fcmInitialized = false;
-let admin = null;
+let messaging = null;
 
 // Look for Firebase Service Account Key (via env var path, raw JSON, or local file)
 const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(__dirname, "serviceAccountKey.json");
 
 try {
   let serviceAccount = null;
+
+  // 1. Resolve credentials from FIREBASE_SERVICE_ACCOUNT_JSON (raw JSON string in env)
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     try {
       serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     } catch (e) {
       console.error("[DURGA NOTIFICATIONS] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
     }
-  } else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+  }
+
+  // 2. Resolve credentials from explicit FIREBASE_SERVICE_ACCOUNT_PATH (if set and not yet resolved)
+  if (!serviceAccount && process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    if (fs.existsSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)) {
+      try {
+        serviceAccount = JSON.parse(fs.readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, "utf8"));
+      } catch (e) {
+        console.error("[DURGA NOTIFICATIONS] Failed to read FIREBASE_SERVICE_ACCOUNT_PATH:", e.message);
+      }
+    } else {
+      console.warn(`[DURGA NOTIFICATIONS] FIREBASE_SERVICE_ACCOUNT_PATH does not exist: ${process.env.FIREBASE_SERVICE_ACCOUNT_PATH}`);
+    }
+  }
+
+  // 3. Resolve credentials from default local serviceAccountKey.json (if not yet resolved)
+  if (!serviceAccount && fs.existsSync(SERVICE_ACCOUNT_PATH)) {
     try {
       serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, "utf8"));
     } catch (e) {
@@ -31,12 +51,18 @@ try {
   }
 
   if (serviceAccount) {
-    admin = require("firebase-admin");
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+    // Validate required fields without exposing sensitive contents
+    if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
+      throw new Error("Invalid service account: missing project_id, client_email, or private_key.");
+    }
+
+    const app = getApps().length === 0
+      ? initializeApp({ credential: cert(serviceAccount) })
+      : getApps()[0];
+
+    messaging = getMessaging(app);
     fcmInitialized = true;
-    console.log("[DURGA NOTIFICATIONS] Firebase Admin SDK initialized successfully with service account.");
+    console.log(`[DURGA NOTIFICATIONS] Firebase Admin SDK initialized successfully for project: ${serviceAccount.project_id}`);
   } else {
     if (process.env.DURGA_REQUIRE_FCM === "true") {
       throw new Error("Production Configuration Error: FCM service account credentials are required.");
@@ -46,6 +72,8 @@ try {
     );
   }
 } catch (e) {
+  fcmInitialized = false;
+  messaging = null;
   if (process.env.DURGA_REQUIRE_FCM === "true") {
     throw e;
   }
@@ -73,7 +101,7 @@ async function dispatchProximityPushNotifications(targetDevices, incident, onInv
 
   for (const device of targetDevices) {
     const payload = {
-      title: "🚨 DURGA EMERGENCY ALERT",
+      title: "DURGA EMERGENCY ALERT",
       body: `Citizen in distress ~${device.distanceKm} km away. Tap to inspect telemetry & view walking route.`,
       data: {
         eventId: eventIdentifier,
@@ -91,7 +119,9 @@ async function dispatchProximityPushNotifications(targetDevices, incident, onInv
       },
     };
 
-    if (fcmInitialized && admin && device.fcm_token) {
+    const isMockToken = !device.fcm_token || device.fcm_token.startsWith("mock_");
+
+    if (fcmInitialized && messaging && device.fcm_token && !isMockToken) {
       try {
         const message = {
           token: device.fcm_token,
@@ -112,7 +142,7 @@ async function dispatchProximityPushNotifications(targetDevices, incident, onInv
           },
         };
 
-        const response = await admin.messaging().send(message);
+        const response = await messaging.send(message);
         results.push({
           deviceId: device.device_id,
           userId: device.user_id,
@@ -146,14 +176,16 @@ async function dispatchProximityPushNotifications(targetDevices, incident, onInv
         });
       }
     } else {
-      // Development mode without live Firebase service credentials
+      // Development mode without live Firebase service credentials or mock token in test mode
       results.push({
         deviceId: device.device_id,
         userId: device.user_id,
         token: device.fcm_token ? device.fcm_token.substring(0, 10) + "..." : "NONE",
         status: "RECORDED_IN_DISPATCH_QUEUE",
         isRealDelivery: false,
-        note: "Backend accepted & targeted within 1km radius (Development audit mode: Firebase service account not configured)",
+        note: fcmInitialized
+          ? "Backend targeted within 1km radius (Mock token detected in test mode)"
+          : "Backend accepted & targeted within 1km radius (Development audit mode: Firebase service account not configured)",
         distanceKm: device.distanceKm,
       });
       console.log(
@@ -162,9 +194,10 @@ async function dispatchProximityPushNotifications(targetDevices, incident, onInv
     }
   }
 
+  const hasRealDelivery = results.some((r) => r.isRealDelivery);
   return {
-    status: fcmInitialized ? "FCM_DISPATCHED" : "LOCAL_DISPATCH_LOGGED_MOCK",
-    isRealDelivery: Boolean(fcmInitialized),
+    status: hasRealDelivery ? "FCM_DISPATCHED" : "LOCAL_DISPATCH_LOGGED_MOCK",
+    isRealDelivery: hasRealDelivery,
     recipientsCount: results.length,
     results,
   };
@@ -195,7 +228,9 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
     schemaVersion: "1.0",
   };
 
-  if (fcmInitialized && admin && targetDevice.fcm_token) {
+  const isMockToken = !targetDevice.fcm_token || targetDevice.fcm_token.startsWith("mock_");
+
+  if (fcmInitialized && messaging && targetDevice.fcm_token && !isMockToken) {
     try {
       const message = {
         token: targetDevice.fcm_token,
@@ -215,7 +250,7 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
         },
       };
 
-      const messageId = await admin.messaging().send(message);
+      const messageId = await messaging.send(message);
       console.log(`[DURGA FCM TEST] Test push submitted to FCM: ${messageId} (Recipient: ${targetDevice.user_id})`);
       return {
         success: true,
@@ -264,7 +299,7 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
     }
   }
 
-  // Development audit mode (when serviceAccountKey.json is not present)
+  // Development audit mode or test mock dispatch
   console.log(`[DURGA TEST NOTIFICATION (AUDIT)] Validated test push to ${targetDevice.user_id}. Payload:`, payload);
   return {
     success: true,
@@ -274,7 +309,9 @@ async function sendTestPushNotification(senderUser, targetDevice, customTitle, c
     recipientUserId: targetDevice.user_id,
     eventId,
     incidentId: eventId,
-    note: "Push delivery mocked: Firebase Admin credentials not configured on backend. (serviceAccountKey.json required for real FCM transport)",
+    note: fcmInitialized
+      ? "Push delivery mocked: Mock token detected in automated test."
+      : "Push delivery mocked: Firebase Admin credentials not configured on backend. (serviceAccountKey.json required for real FCM transport)",
   };
 }
 

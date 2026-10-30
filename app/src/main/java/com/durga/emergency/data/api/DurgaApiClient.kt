@@ -100,7 +100,8 @@ class DurgaApiClient(private val context: Context) {
         latitude: Double?,
         longitude: Double?,
         radiusKm: Double = 1.0,
-        excludeUserId: String? = null
+        excludeUserId: String? = null,
+        excludeDeviceId: String? = null
     ): Result<List<com.durga.emergency.data.model.EmergencyEvent>> = withContext(Dispatchers.IO) {
         try {
             val queryParams = mutableListOf<String>()
@@ -108,6 +109,8 @@ class DurgaApiClient(private val context: Context) {
             if (longitude != null) queryParams.add("longitude=$longitude")
             queryParams.add("radius=$radiusKm")
             if (!excludeUserId.isNullOrEmpty()) queryParams.add("excludeUserId=$excludeUserId")
+            val effectiveDeviceId = excludeDeviceId ?: prefs.deviceId
+            if (effectiveDeviceId.isNotEmpty()) queryParams.add("excludeDeviceId=$effectiveDeviceId")
 
             val queryString = queryParams.joinToString("&")
             val url = "$baseUrl/incidents/proximity?$queryString"
@@ -216,24 +219,49 @@ class DurgaApiClient(private val context: Context) {
             executePost("$baseUrl/devices/register", payload.toString(), authToken)
             Result.success(true)
         } catch (e: Exception) {
-            Log.e(TAG, "registerDevice error", e)
+            Log.e(TAG, "registerDevice error: ${e.message}")
             Result.failure(e)
         }
     }
 
     suspend fun revokeDeviceToken(
         deviceId: String? = null,
-        fcmToken: String? = null
+        fcmToken: String? = null,
+        authTokenOverride: String? = null
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val payload = JsonObject().apply {
                 if (!deviceId.isNullOrEmpty()) addProperty("deviceId", deviceId)
                 if (!fcmToken.isNullOrEmpty()) addProperty("fcmToken", fcmToken)
             }
-            executePost("$baseUrl/devices/revoke-token", payload.toString(), authToken)
+            val tokenToUse = authTokenOverride ?: authToken
+            executePost("$baseUrl/devices/revoke-token", payload.toString(), tokenToUse)
             Result.success(true)
         } catch (e: Exception) {
             Log.e(TAG, "revokeDeviceToken error", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateProfile(
+        name: String? = null,
+        emergencyContactName: String? = null,
+        emergencyContactPhone: String? = null,
+        bloodGroup: String? = null,
+        homeAddress: String? = null
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                if (!name.isNullOrEmpty()) addProperty("name", name)
+                if (!emergencyContactName.isNullOrEmpty()) addProperty("emergencyContactName", emergencyContactName)
+                if (!emergencyContactPhone.isNullOrEmpty()) addProperty("emergencyContactPhone", emergencyContactPhone)
+                if (!bloodGroup.isNullOrEmpty()) addProperty("bloodGroup", bloodGroup)
+                if (!homeAddress.isNullOrEmpty()) addProperty("homeAddress", homeAddress)
+            }
+            executePost("$baseUrl/users/profile", payload.toString(), authToken)
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "updateProfile error", e)
             Result.failure(e)
         }
     }
@@ -279,6 +307,7 @@ class DurgaApiClient(private val context: Context) {
                 addProperty("triggerSource", triggerSource)
                 addProperty("distressScore", distressScore)
                 addProperty("distressClassification", distressClass)
+                addProperty("deviceId", prefs.deviceId)
             }
             val response = executePost("$baseUrl/incidents", payload.toString(), authToken)
             val json = gson.fromJson(response, JsonObject::class.java)
@@ -401,10 +430,11 @@ class DurgaApiClient(private val context: Context) {
         val url = URL(urlString)
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            setRequestProperty("Content-Type", "application/json; utf-8")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
             setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            setRequestProperty("X-Device-Id", prefs.deviceId)
             connectTimeout = 12000
             readTimeout = 12000
             if (token != null) {
@@ -437,10 +467,11 @@ class DurgaApiClient(private val context: Context) {
                 requestMethod = "POST"
                 setRequestProperty("X-HTTP-Method-Override", "PATCH")
             }
-            setRequestProperty("Content-Type", "application/json; utf-8")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
             setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            setRequestProperty("X-Device-Id", prefs.deviceId)
             connectTimeout = 12000
             readTimeout = 12000
             if (token != null) {
@@ -471,6 +502,7 @@ class DurgaApiClient(private val context: Context) {
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "DURGA-Emergency-Android/1.0")
             setRequestProperty("Bypass-Tunnel-Reminder", "true")
+            setRequestProperty("X-Device-Id", prefs.deviceId)
             connectTimeout = 12000
             readTimeout = 12000
             if (token != null) {

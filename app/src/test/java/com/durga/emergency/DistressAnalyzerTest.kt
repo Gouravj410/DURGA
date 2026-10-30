@@ -19,13 +19,14 @@ class DistressAnalyzerTest {
     private val analyzer = DurgaScoringDistressAnalyzer()
 
     @Test
-    fun analyzeAudioFile_nonExistentFile_returnsEmergencyFallbackResult() = runBlocking {
+    fun analyzeAudioFile_nonExistentFile_returnsInconclusiveSafetyFallback() = runBlocking {
         val dummyFile = File("non_existent_file.wav")
         val result = analyzer.analyzeAudioFile(dummyFile)
 
-        assertEquals(0.85f, result.score, 0.01f)
-        assertTrue(result.classification.contains("High Distress"))
-        assertEquals(0.90f, result.confidence, 0.01f)
+        // Safety principle: missing/empty audio must NOT auto-escalate with high distress score
+        assertEquals(0.25f, result.score, 0.01f)
+        assertTrue(result.classification.contains("Inconclusive"))
+        assertEquals(0.50f, result.confidence, 0.01f)
     }
 
     @Test

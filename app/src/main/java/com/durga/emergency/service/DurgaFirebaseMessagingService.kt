@@ -32,8 +32,8 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "DURGA_FCM"
-        const val CHANNEL_ID = "durga_emergency_alerts"
-        const val CHANNEL_NAME = "DURGA Emergency Alerts"
+        const val CHANNEL_ID = "durga_emergency_siren_v3"
+        const val CHANNEL_NAME = "DURGA Emergency Siren Alerts"
 
         // Deduplication cache: retain last 50 processed message IDs
         private val processedMessageIds: MutableSet<String> =
@@ -63,7 +63,7 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
             val apiClient = DurgaApiClient.getInstance(applicationContext)
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    apiClient.registerDevice(
+                    val result = apiClient.registerDevice(
                         fcmToken = token,
                         deviceId = prefs.deviceId,
                         deviceModel = Build.MODEL,
@@ -71,9 +71,13 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
                         longitude = null,
                         accuracy = null
                     )
-                    Log.i(TAG, "Rotated FCM token synchronized to central backend for device ${prefs.deviceId}")
+                    result.onSuccess {
+                        Log.i(TAG, "Rotated FCM token synchronized to central backend for device ${prefs.deviceId}")
+                    }.onFailure { error ->
+                        Log.e(TAG, "Backend registration FAILED for rotated token on device ${prefs.deviceId}: ${error.message}", error)
+                    }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to sync rotated FCM token: ${e.message}")
+                    Log.e(TAG, "Unexpected error synchronizing rotated FCM token: ${e.message}", e)
                 }
             }
         }
@@ -142,27 +146,34 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Ensure channel exists
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val existing = notificationManager.getNotificationChannel(CHANNEL_ID)
-            if (existing == null) {
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "High-priority emergency alerts and verified test notifications"
-                    enableLights(true)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 500, 200, 500)
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
-        }
+        val customSoundUri = android.net.Uri.parse("android.resource://$packageName/${R.raw.durga_emergency_siren}")
 
-        val alarmSound = RingtoneManager.getDefaultUri(
-            if (parsed.isTest) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
-        )
+        // Ensure channel exists with custom DURGA siren
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                notificationManager.deleteNotificationChannel("durga_emergency_alerts")
+            } catch (e: Exception) {
+                // ignore
+            }
+
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .build()
+
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "High-priority emergency alerts with custom DURGA siren"
+                enableLights(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500)
+                setSound(customSoundUri, audioAttributes)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_shield)
@@ -170,9 +181,9 @@ class DurgaFirebaseMessagingService : FirebaseMessagingService() {
             .setContentText(parsed.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(parsed.body))
             .setAutoCancel(true)
-            .setSound(alarmSound)
+            .setSound(if (parsed.isTest) RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) else customSoundUri)
             .setVibrate(if (parsed.isTest) longArrayOf(0, 250, 150, 250) else longArrayOf(0, 500, 200, 500))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setContentIntent(pendingIntent)
 
         val notificationId = if (parsed.isTest) 9999 else (System.currentTimeMillis() % 100000).toInt()

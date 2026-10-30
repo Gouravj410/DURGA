@@ -123,4 +123,33 @@ class NotificationPayloadParserTest {
         assertEquals("TEST-FCM-999", parsed.eventId)
         assertEquals("DURGA_TEST", parsed.type)
     }
+
+    @Test
+    fun parse_backendFieldNames_resolvesFallbacksCorrectly() {
+        // Backend notification_service.js emits locationAccuracy and nearestStation
+        val payload = mapOf(
+            "incidentId" to "INC-BACKEND-01",
+            "type" to "DURGA_EMERGENCY",
+            "latitude" to "28.6139",
+            "longitude" to "77.2090",
+            "locationAccuracy" to "15.0",
+            "distressScore" to "0.88",
+            "classification" to "Scream Detected",
+            "nearestStation" to "Connaught Place Police Station",
+            "distanceKm" to "0.32",
+            "status" to "ACTIVE"
+        )
+
+        val parsed = NotificationPayloadParser.parse(payload)
+
+        assertEquals("INC-BACKEND-01", parsed.eventId)
+        assertEquals(28.6139, parsed.latitude!!, 0.0001)
+        assertEquals(77.2090, parsed.longitude!!, 0.0001)
+        assertEquals(15.0f, parsed.accuracy!!, 0.01f)
+        assertEquals(0.88f, parsed.distressScore, 0.01f)
+        assertEquals("Scream Detected", parsed.classification)
+        assertEquals("Connaught Place Police Station", parsed.nearestStation)
+        assertEquals(0.32, parsed.distanceKm!!, 0.01)
+        assertEquals("ACTIVE", parsed.status)
+    }
 }

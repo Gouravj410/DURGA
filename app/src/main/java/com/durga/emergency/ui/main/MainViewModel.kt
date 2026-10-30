@@ -93,6 +93,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var safetyTimer: CountDownTimer? = null
     private var locationStreamingJob: Job? = null
     private var proximityMonitoringJob: Job? = null
+    private val dismissedIncidentIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    private val _isBackendOnline = MutableLiveData<Boolean>(false)
+    val isBackendOnline: LiveData<Boolean> = _isBackendOnline
 
     init {
         // Authenticate development session with the backend and register device
@@ -100,39 +104,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startProximityMonitoring()
     }
 
-    private fun ensureBackendSession() {
+    fun ensureBackendSession(maxRetries: Int = 3) {
         viewModelScope.launch {
-            try {
-                withTimeoutOrNull(8000) {
-                    val phone = prefs.userPhone
-                    val name = prefs.userName
+            val phone = prefs.userPhone
+            if (phone.isBlank()) {
+                Log.d(TAG, "No user phone stored yet; skipping background session authentication.")
+                return@launch
+            }
+            val name = prefs.userName.ifBlank { "Protected Citizen" }
 
-                    // Request test OTP and verify
-                    val otpResult = apiClient.requestOtp(phone)
-                    val testOtp = otpResult.getOrNull()?.ifEmpty { "123456" } ?: "123456"
+            for (attempt in 1..maxRetries) {
+                try {
+                    val authSuccess = withTimeoutOrNull(8000) {
+                        val otpResult = apiClient.requestOtp(phone)
+                        val testOtp = otpResult.getOrNull()?.ifEmpty { "123456" } ?: "123456"
 
-                    val authResult = apiClient.verifyOtp(phone, testOtp, name, "CITIZEN")
-                    if (authResult.isSuccess) {
-                        val auth = authResult.getOrThrow()
-                        prefs.userId = auth.userId
-                        prefs.authToken = auth.token
-                        Log.d(TAG, "Backend authenticated successfully as ${auth.userId} (${auth.name})")
+                        val authResult = apiClient.verifyOtp(phone, testOtp, name, "CITIZEN")
+                        if (authResult.isSuccess) {
+                            val auth = authResult.getOrThrow()
+                            prefs.userId = auth.userId
+                            prefs.authToken = auth.token
+                            Log.d(TAG, "Backend authenticated successfully as ${auth.userId} (${auth.name})")
 
-                        // Acquire initial GPS location
-                        val loc = locationProvider.getCurrentLocation()
-                        apiClient.registerDevice(
-                            fcmToken = prefs.fcmToken,
-                            deviceId = prefs.deviceId,
-                            latitude = loc?.latitude,
-                            longitude = loc?.longitude,
-                            accuracy = loc?.accuracy
-                        )
-                    } else {
-                        Log.w(TAG, "Backend authentication note: ${authResult.exceptionOrNull()?.message}")
+                            val loc = locationProvider.getCurrentLocation()
+                            apiClient.registerDevice(
+                                fcmToken = prefs.fcmToken,
+                                deviceId = prefs.deviceId,
+                                latitude = loc?.latitude,
+                                longitude = loc?.longitude,
+                                accuracy = loc?.accuracy
+                            )
+                            true
+                        } else {
+                            false
+                        }
+                    } ?: false
+
+                    if (authSuccess) {
+                        _isBackendOnline.postValue(true)
+                        Log.i(TAG, "✅ Central emergency server online & authenticated (attempt $attempt)")
+                        break
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Backend authentication attempt $attempt failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Backend connection note: Central cloud dispatch offline (${e.message})")
+
+                if (attempt < maxRetries) {
+                    delay(2000L)
+                }
             }
         }
     }
@@ -168,13 +187,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             latitude = lat,
                             longitude = lon,
                             radiusKm = 1.0,
-                            excludeUserId = myUserId
+                            excludeUserId = myUserId,
+                            excludeDeviceId = prefs.deviceId
                         )
 
                         if (result.isSuccess) {
                             val incidents = result.getOrNull() ?: emptyList()
-                            val activeIncident = incidents.firstOrNull {
-                                it.status in listOf("ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING")
+                            val now = System.currentTimeMillis()
+                            val activeIncident = incidents.firstOrNull { inc ->
+                                inc.status in listOf("ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING")
+                                    && inc.userId != myUserId
+                                    && !dismissedIncidentIds.contains(inc.eventId)
+                                    && (now - inc.timestamp) < (15 * 60 * 1000L)
                             }
 
                             if (activeIncident != null) {
@@ -198,7 +222,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun dismissProximityAlert() {
+    fun dismissProximityAlert(incidentId: String? = null) {
+        if (!incidentId.isNullOrEmpty()) {
+            dismissedIncidentIds.add(incidentId)
+            Log.i(TAG, "Silenced proximity alert for incident $incidentId permanently on this device.")
+        }
         _nearbyMeshAlertEvent.postValue(null)
     }
 
@@ -218,6 +246,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         status: String = "ACTIVE"
     ) {
         if (eventId.isEmpty()) return
+
+        // When user explicitly opens a notification for an alert, allow re-presenting it
+        dismissedIncidentIds.remove(eventId)
 
         Log.i(TAG, "🚨 Emergency notification tapped for incident: $eventId")
         val tappedEvent = EmergencyEvent(
@@ -244,7 +275,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     latitude = loc?.latitude ?: latitude,
                     longitude = loc?.longitude ?: longitude,
                     radiusKm = 2.0,
-                    excludeUserId = prefs.userId
+                    excludeUserId = null,
+                    excludeDeviceId = prefs.deviceId
                 )
                 if (result.isSuccess) {
                     val matching = result.getOrNull()?.firstOrNull { it.eventId == eventId }
@@ -413,6 +445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val incidentId = result.getOrNull()?.incidentId ?: ("INC-" + System.currentTimeMillis().toString().takeLast(6))
+        dismissedIncidentIds.add(incidentId)
 
         // Upload audio evidence if available
         if (audioFile != null && audioFile.exists()) {
@@ -547,6 +580,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.contactPhone = phone
         _userName.value = user
         _contactPhone.value = phone
+
+        viewModelScope.launch {
+            try {
+                apiClient.updateProfile(
+                    name = user,
+                    emergencyContactName = contact,
+                    emergencyContactPhone = phone
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Profile update sync note: ${e.message}")
+            }
+        }
     }
 
     override fun onCleared() {

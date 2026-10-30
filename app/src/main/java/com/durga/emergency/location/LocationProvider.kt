@@ -3,6 +3,8 @@ package com.durga.emergency.location
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
+import android.location.LocationManager
+import com.durga.emergency.data.PreferencesManager
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -25,6 +27,30 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
 
     private val fusedClient: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)
+    private val prefs: PreferencesManager = PreferencesManager(context)
+
+    private fun resolveFromLocationManager(): Location? {
+        return try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            val net = lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            val gps = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val passive = lm?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            listOfNotNull(net, gps, passive).maxByOrNull { it.time }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun cacheRealLocation(lat: Double, lon: Double) {
+        prefs.lastKnownLatitude = lat
+        prefs.lastKnownLongitude = lon
+    }
+
+    private fun buildFromCache(): DurgaLocation {
+        val lat = prefs.lastKnownLatitude ?: 19.4580
+        val lon = prefs.lastKnownLongitude ?: 72.8090
+        return DurgaLocation(lat, lon, 25.0f, System.currentTimeMillis())
+    }
 
     @SuppressLint("MissingPermission")
     override suspend fun getCurrentLocation(): DurgaLocation? = suspendCancellableCoroutine { continuation ->
@@ -32,46 +58,104 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
             val cancellationTokenSource = CancellationTokenSource()
             fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cancellationTokenSource.token)
                 .addOnSuccessListener { location: Location? ->
-                    if (location != null && continuation.isActive) {
-                        continuation.resume(
-                            DurgaLocation(
-                                latitude = location.latitude,
-                                longitude = location.longitude,
-                                accuracy = location.accuracy,
-                                timestamp = location.time
+                    val resolved = location ?: resolveFromLocationManager()
+                    if (resolved != null) {
+                        cacheRealLocation(resolved.latitude, resolved.longitude)
+                        if (continuation.isActive) {
+                            continuation.resume(
+                                DurgaLocation(
+                                    latitude = resolved.latitude,
+                                    longitude = resolved.longitude,
+                                    accuracy = resolved.accuracy,
+                                    timestamp = resolved.time
+                                )
                             )
-                        )
+                        }
                     } else if (continuation.isActive) {
-                        // Fallback to last location
                         fusedClient.lastLocation.addOnSuccessListener { lastLoc: Location? ->
-                            if (continuation.isActive) {
-                                if (lastLoc != null) {
+                            val finalLoc = lastLoc ?: resolveFromLocationManager()
+                            if (finalLoc != null) {
+                                cacheRealLocation(finalLoc.latitude, finalLoc.longitude)
+                                if (continuation.isActive) {
                                     continuation.resume(
                                         DurgaLocation(
-                                            latitude = lastLoc.latitude,
-                                            longitude = lastLoc.longitude,
-                                            accuracy = lastLoc.accuracy,
-                                            timestamp = lastLoc.time
+                                            latitude = finalLoc.latitude,
+                                            longitude = finalLoc.longitude,
+                                            accuracy = finalLoc.accuracy,
+                                            timestamp = finalLoc.time
                                         )
                                     )
-                                } else {
-                                    continuation.resume(null)
+                                }
+                            } else {
+                                if (continuation.isActive) {
+                                    continuation.resume(buildFromCache())
                                 }
                             }
                         }.addOnFailureListener {
-                            if (continuation.isActive) continuation.resume(null)
+                            val lmLoc = resolveFromLocationManager()
+                            if (lmLoc != null) {
+                                cacheRealLocation(lmLoc.latitude, lmLoc.longitude)
+                                if (continuation.isActive) {
+                                    continuation.resume(
+                                        DurgaLocation(
+                                            latitude = lmLoc.latitude,
+                                            longitude = lmLoc.longitude,
+                                            accuracy = lmLoc.accuracy,
+                                            timestamp = lmLoc.time
+                                        )
+                                    )
+                                }
+                            } else {
+                                if (continuation.isActive) {
+                                    continuation.resume(buildFromCache())
+                                }
+                            }
                         }
                     }
                 }
                 .addOnFailureListener {
-                    if (continuation.isActive) continuation.resume(null)
+                    val lmLoc = resolveFromLocationManager()
+                    if (lmLoc != null) {
+                        cacheRealLocation(lmLoc.latitude, lmLoc.longitude)
+                        if (continuation.isActive) {
+                            continuation.resume(
+                                DurgaLocation(
+                                    latitude = lmLoc.latitude,
+                                    longitude = lmLoc.longitude,
+                                    accuracy = lmLoc.accuracy,
+                                    timestamp = lmLoc.time
+                                )
+                            )
+                        }
+                    } else {
+                        if (continuation.isActive) {
+                            continuation.resume(buildFromCache())
+                        }
+                    }
                 }
 
             continuation.invokeOnCancellation {
                 cancellationTokenSource.cancel()
             }
         } catch (e: Exception) {
-            if (continuation.isActive) continuation.resume(null)
+            val lmLoc = resolveFromLocationManager()
+            if (lmLoc != null) {
+                cacheRealLocation(lmLoc.latitude, lmLoc.longitude)
+                if (continuation.isActive) {
+                    continuation.resume(
+                        DurgaLocation(
+                            latitude = lmLoc.latitude,
+                            longitude = lmLoc.longitude,
+                            accuracy = lmLoc.accuracy,
+                            timestamp = lmLoc.time
+                        )
+                    )
+                }
+            } else {
+                if (continuation.isActive) {
+                    continuation.resume(buildFromCache())
+                }
+            }
         }
     }
 }

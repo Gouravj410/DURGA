@@ -13,6 +13,7 @@
 const http = require("http");
 const { runQuery, getQuery } = require("../database");
 const { parseNotificationPayload, dispatchProximityPushNotifications } = require("../notification_service");
+const { filterDevicesWithinRadius, calculateHaversineDistanceKm } = require("../geo_utils");
 
 const BASE_URL = "http://localhost:3000";
 
@@ -497,8 +498,165 @@ async function runTests() {
     assert(dispatchRes.results[0].status === "RECORDED_IN_DISPATCH_QUEUE", "Recipient marked RECORDED_IN_DISPATCH_QUEUE");
     console.log("  ✓ Proximity push dispatch contract verified with honest mock reporting");
 
+    // 25. Geospatial Radius Boundary & Recipient Eligibility Filtering
+    console.log("\n[TEST 25] Geospatial Radius Boundary, Recipient Eligibility & Deduplication");
+    const now = Date.now();
+    const incidentCoords = { lat: 18.5204, lon: 73.8567 };
+
+    // Device exactly at ~0.5 km (Shivajinagar nearby)
+    const validDevice1 = {
+      id: "DEV-NEARBY-1",
+      user_id: "USER-CITIZEN-1",
+      fcm_token: "mock_fcm_token_valid_1",
+      last_lat: 18.523,
+      last_lon: 73.859,
+      last_accuracy: 12.0,
+      last_location_time: now - 60000, // 1 min ago
+      is_opted_in: 1,
+    };
+
+    // Stale device (> 24 hours ago)
+    const staleDevice = {
+      id: "DEV-STALE",
+      user_id: "USER-CITIZEN-STALE",
+      fcm_token: "mock_fcm_token_stale",
+      last_lat: 18.521,
+      last_lon: 73.857,
+      last_accuracy: 10.0,
+      last_location_time: now - 25 * 60 * 60 * 1000, // 25 hours ago
+      is_opted_in: 1,
+    };
+
+    // Inaccurate device (> 1000 meters)
+    const inaccurateDevice = {
+      id: "DEV-INACCURATE",
+      user_id: "USER-CITIZEN-INACC",
+      fcm_token: "mock_fcm_token_inacc",
+      last_lat: 18.521,
+      last_lon: 73.857,
+      last_accuracy: 1500.0,
+      last_location_time: now - 60000,
+      is_opted_in: 1,
+    };
+
+    // Victim's own device (same user_id as incident creator)
+    const victimDevice = {
+      id: "DEV-VICTIM",
+      user_id: citizenAId,
+      fcm_token: "mock_fcm_token_victim",
+      last_lat: 18.5205,
+      last_lon: 73.8568,
+      last_accuracy: 5.0,
+      last_location_time: now - 10000,
+      is_opted_in: 1,
+    };
+
+    // Opted-out device
+    const optedOutDevice = {
+      id: "DEV-OPTED-OUT",
+      user_id: "USER-CITIZEN-OPTED-OUT",
+      fcm_token: "mock_fcm_token_opted_out",
+      last_lat: 18.521,
+      last_lon: 73.857,
+      last_accuracy: 10.0,
+      last_location_time: now - 30000,
+      is_opted_in: 0,
+    };
+
+    // Device with missing/empty token
+    const emptyTokenDevice = {
+      id: "DEV-NO-TOKEN",
+      user_id: "USER-CITIZEN-NO-TOKEN",
+      fcm_token: "",
+      last_lat: 18.521,
+      last_lon: 73.857,
+      last_accuracy: 10.0,
+      last_location_time: now - 30000,
+      is_opted_in: 1,
+    };
+
+    // Duplicate device for USER-CITIZEN-1 (further away at 0.8 km)
+    const dupDeviceUser1 = {
+      id: "DEV-NEARBY-1-DUP",
+      user_id: "USER-CITIZEN-1",
+      fcm_token: "mock_fcm_token_valid_1_secondary",
+      last_lat: 18.525,
+      last_lon: 73.862,
+      last_accuracy: 15.0,
+      last_location_time: now - 30000,
+      is_opted_in: 1,
+    };
+
+    // Out of radius device (> 1.0 km away: ~3.5 km away)
+    const farDevice = {
+      id: "DEV-FAR",
+      user_id: "USER-CITIZEN-FAR",
+      fcm_token: "mock_fcm_token_far",
+      last_lat: 18.552,
+      last_lon: 73.882,
+      last_accuracy: 10.0,
+      last_location_time: now - 60000,
+      is_opted_in: 1,
+    };
+
+    const testPool = [
+      validDevice1,
+      staleDevice,
+      inaccurateDevice,
+      victimDevice,
+      optedOutDevice,
+      emptyTokenDevice,
+      dupDeviceUser1,
+      farDevice,
+    ];
+
+    const filtered = filterDevicesWithinRadius(
+      incidentCoords.lat,
+      incidentCoords.lon,
+      testPool,
+      1.0,
+      citizenAId
+    );
+
+    assert(filtered.length === 1, "Exactly 1 eligible recipient selected from 8 candidates");
+    assert(filtered[0].id === "DEV-NEARBY-1", "Only closest valid, opted-in, non-victim device selected");
+    assert(filtered[0].user_id === "USER-CITIZEN-1", "Duplicate device for same user deduplicated to nearest");
+    assert(filtered[0].distanceKm <= 1.0, "Selected recipient is within 1.0 km radius");
+
+    // Invalid coordinate resilience check
+    const invalidCoordsFilter = filterDevicesWithinRadius("invalid", null, testPool, 1.0, citizenAId);
+    assert(invalidCoordsFilter.length === 0, "Invalid incident coordinates safely returns empty array without throwing");
+    console.log("  ✓ Geospatial radius, freshness, accuracy, opt-in, and deduplication verified");
+
+    // 26. Truthful Device Registration & Token Revocation Security
+    console.log("\n[TEST 26] Device Registration Authentication & Token Isolation");
+    // 26a. Unauthenticated registration rejected
+    const unauthRegRes = await makeRequest("POST", "/api/v1/devices/register", {
+      deviceId: "ROGUE-PHONE",
+      fcmToken: "rogue_token",
+    });
+    assert(unauthRegRes.status === 401 || unauthRegRes.status === 403, "Unauthenticated device registration rejected");
+
+    // 26b. Unauthenticated token revocation rejected
+    const unauthRevokeRes = await makeRequest("POST", "/api/v1/devices/revoke-token", {
+      deviceId: "ROGUE-PHONE",
+    });
+    assert(unauthRevokeRes.status === 401 || unauthRevokeRes.status === 403, "Unauthenticated token revocation rejected");
+
+    // 26c. User cannot revoke another user's device token
+    const crossRevokeRes = await makeRequest(
+      "POST",
+      "/api/v1/devices/revoke-token",
+      { deviceId: "PHONE-B" }, // Belongs to Citizen B
+      citizenAToken // Authenticated as Citizen A
+    );
+    assert(crossRevokeRes.status === 200, "Revoke endpoint handled gracefully");
+    const citizenBDevice = await getQuery("SELECT fcm_token FROM devices WHERE id = 'PHONE-B'");
+    assert(citizenBDevice.fcm_token !== null, "Citizen A cannot revoke Citizen B's device token (cross-user isolation verified)");
+    console.log("  ✓ Truthful device registration and isolated revocation security verified");
+
     console.log("\n=================================================================");
-    console.log("  ALL 24 BACKEND ACCEPTANCE TESTS PASSED SUCCESSFULLY! (100%)");
+    console.log("  ALL 26 BACKEND ACCEPTANCE TESTS PASSED SUCCESSFULLY! (100%)");
     console.log("=================================================================\n");
     process.exit(0);
   } catch (err) {

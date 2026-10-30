@@ -31,7 +31,7 @@ object NotificationPayloadParser {
 
         val title = notificationTitle
             ?: data["title"]
-            ?: if (isTest) "DURGA Test Notification" else "🚨 DURGA EMERGENCY ALERT"
+            ?: if (isTest) "DURGA Test Notification" else "DURGA EMERGENCY ALERT"
 
         val body = notificationBody
             ?: data["body"]
@@ -39,10 +39,10 @@ object NotificationPayloadParser {
 
         val lat = data["latitude"]?.toDoubleOrNull()
         val lon = data["longitude"]?.toDoubleOrNull()
-        val acc = data["accuracy"]?.toFloatOrNull()
+        val acc = (data["accuracy"] ?: data["locationAccuracy"])?.toFloatOrNull()
         val score = data["distressScore"]?.toFloatOrNull() ?: 0.95f
-        val classification = data["distressClassification"] ?: "Acoustic Distress Confirmed"
-        val station = data["nearestPoliceStation"] ?: "Nearest Police Station"
+        val classification = data["distressClassification"] ?: data["classification"] ?: "Acoustic Distress Confirmed"
+        val station = data["nearestStation"] ?: data["nearestPoliceStation"] ?: "Nearest Police Station"
         val distKm = data["distanceKm"]?.toDoubleOrNull()
         val status = data["status"] ?: "ACTIVE"
 

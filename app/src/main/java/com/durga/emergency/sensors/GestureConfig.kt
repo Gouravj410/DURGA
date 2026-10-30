@@ -21,10 +21,10 @@ data class GestureConfig(
     val id: String,
     val name: String,
     val type: GestureType,
-    val sensitivityThreshold: Float = 13.0f, // m/s^2 acceleration
-    val repetitionCount: Int = 3,           // required directional shakes
-    val windowDurationMs: Long = 1500L,     // window duration in ms
-    val cooldownDurationMs: Long = 3000L,   // cooldown to prevent accidental repeat activation
+    val sensitivityThreshold: Float = 18.0f, // Dynamic m/s^2 linear acceleration (gravity isolated)
+    val repetitionCount: Int = 3,           // required alternating directional shakes
+    val windowDurationMs: Long = 2000L,     // window duration in ms
+    val cooldownDurationMs: Long = 5000L,   // cooldown to prevent accidental repeat activation
     val touchPatternPoints: List<GesturePoint> = emptyList(),
     val isPrimary: Boolean = false,
     val isEnabled: Boolean = true
@@ -35,10 +35,10 @@ data class GestureConfig(
                 id = "GESTURE_DEFAULT_SHAKE",
                 name = "Triple Deliberate Shake (Default)",
                 type = GestureType.MOTION_SHAKE_SEQUENCE,
-                sensitivityThreshold = 13.0f,
+                sensitivityThreshold = 18.0f,
                 repetitionCount = 3,
-                windowDurationMs = 1500L,
-                cooldownDurationMs = 3000L,
+                windowDurationMs = 2000L,
+                cooldownDurationMs = 5000L,
                 isPrimary = true,
                 isEnabled = true
             )
@@ -49,10 +49,10 @@ data class GestureConfig(
                 id = "GESTURE_RAPID_4SHAKE",
                 name = "Rapid 4-Shake Emergency",
                 type = GestureType.MOTION_SHAKE_SEQUENCE,
-                sensitivityThreshold = 15.0f,
+                sensitivityThreshold = 22.0f,
                 repetitionCount = 4,
-                windowDurationMs = 2000L,
-                cooldownDurationMs = 3000L,
+                windowDurationMs = 2500L,
+                cooldownDurationMs = 5000L,
                 isPrimary = false,
                 isEnabled = true
             )

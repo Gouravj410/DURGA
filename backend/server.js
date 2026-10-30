@@ -44,6 +44,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+
+// Normalize non-standard Content-Type (e.g., application/json; utf-8 -> application/json; charset=utf-8)
+app.use((req, res, next) => {
+  const ct = req.headers["content-type"];
+  if (ct && ct.includes("application/json") && ct.includes("utf-8") && !ct.includes("charset=")) {
+    req.headers["content-type"] = "application/json; charset=utf-8";
+  }
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -91,17 +101,26 @@ async function writeAuditLog(incidentId, actorId, actorRole, action, details) {
 // ==============================================================================
 
 app.post("/api/v1/auth/request-otp", (req, res) => {
-  const { phone } = req.body;
+  const phone = (req.body?.phone || req.body?.phoneNumber || "").toString().trim();
   if (!phone) {
     return res.status(400).json({ error: "Phone number is required." });
   }
-  const result = requestOtp(phone);
-  res.json(result);
+  try {
+    const result = requestOtp(phone);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post("/api/v1/auth/verify-otp", async (req, res) => {
-  const { phone, otp, name, role } = req.body;
+  const phone = (req.body?.phone || req.body?.phoneNumber || "").toString().trim();
+  const otp = (req.body?.otp || req.body?.code || req.body?.verificationCode || "").toString().trim();
+  const name = (req.body?.name || req.body?.userName || "Protected Citizen").toString().trim();
+  const role = (req.body?.role || "CITIZEN").toString().trim();
+
   if (!phone || !otp) {
+    console.warn(`[DURGA AUTH WARN] /verify-otp missing phone or otp: phone="${phone}", otp="${otp}"`);
     return res.status(400).json({ error: "Phone number and OTP are required." });
   }
   try {
@@ -109,6 +128,7 @@ app.post("/api/v1/auth/verify-otp", async (req, res) => {
     await writeAuditLog(null, result.user.id, result.user.role, "USER_LOGIN", `Phone: ${phone}`);
     res.json(result);
   } catch (err) {
+    console.warn(`[DURGA AUTH WARN] verifyOtp error for ${phone}: ${err.message}`);
     res.status(400).json({ error: err.message });
   }
 });
@@ -124,6 +144,63 @@ app.post("/api/v1/auth/set-pin", authenticateToken, async (req, res) => {
   }
 });
 
+app.get("/api/v1/users/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await getQuery(
+      "SELECT id, phone, name, role, emergency_contact_name, emergency_contact_phone, blood_group, home_address, created_at FROM users WHERE id = ?",
+      [req.user.userId]
+    );
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const handleProfileUpdate = async (req, res) => {
+  const { name, emergencyContactName, emergencyContactPhone, bloodGroup, homeAddress } = req.body;
+  try {
+    const user = await getQuery("SELECT * FROM users WHERE id = ?", [req.user.userId]);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const updatedName = name !== undefined ? name.toString().trim() : user.name;
+    const updatedEcName = emergencyContactName !== undefined ? emergencyContactName.toString().trim() : user.emergency_contact_name;
+    const updatedEcPhone = emergencyContactPhone !== undefined ? emergencyContactPhone.toString().trim() : user.emergency_contact_phone;
+    const updatedBlood = bloodGroup !== undefined ? bloodGroup.toString().trim() : user.blood_group;
+    const updatedAddress = homeAddress !== undefined ? homeAddress.toString().trim() : user.home_address;
+
+    await runQuery(
+      `UPDATE users 
+       SET name = ?, emergency_contact_name = ?, emergency_contact_phone = ?, blood_group = ?, home_address = ? 
+       WHERE id = ?`,
+      [updatedName, updatedEcName, updatedEcPhone, updatedBlood, updatedAddress, req.user.userId]
+    );
+
+    await writeAuditLog(null, req.user.userId, req.user.role, "UPDATE_PROFILE", `Name: ${updatedName}`);
+    res.json({
+      success: true,
+      message: "Citizen profile updated successfully in DURGA database.",
+      user: {
+        id: req.user.userId,
+        phone: user.phone,
+        name: updatedName,
+        emergencyContactName: updatedEcName,
+        emergencyContactPhone: updatedEcPhone,
+        bloodGroup: updatedBlood,
+        homeAddress: updatedAddress,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+app.put("/api/v1/users/profile", authenticateToken, handleProfileUpdate);
+app.post("/api/v1/users/profile", authenticateToken, handleProfileUpdate);
+
 // ==============================================================================
 // 2. Device Registration & Location Tracking
 // ==============================================================================
@@ -134,34 +211,66 @@ app.post("/api/v1/devices/register", authenticateToken, async (req, res) => {
   const deviceId = req.body.deviceId || `DEV-${userId.substring(5)}`;
   const now = Date.now();
 
+  const cleanFcmToken =
+    typeof fcmToken === "string" && fcmToken.trim().length > 0 && fcmToken.trim().toLowerCase() !== "null"
+      ? fcmToken.trim()
+      : null;
+  const cleanDeviceModel =
+    typeof deviceModel === "string" && deviceModel.trim().length > 0
+      ? deviceModel.trim()
+      : null;
+  const cleanLat =
+    latitude !== undefined && latitude !== null && !isNaN(Number(latitude))
+      ? Number(latitude)
+      : null;
+  const cleanLon =
+    longitude !== undefined && longitude !== null && !isNaN(Number(longitude))
+      ? Number(longitude)
+      : null;
+  const cleanAcc =
+    accuracy !== undefined && accuracy !== null && !isNaN(Number(accuracy))
+      ? Number(accuracy)
+      : null;
+  const locationTime = cleanLat !== null ? now : null;
+  const cleanOptedIn =
+    req.body.isOptedIn !== undefined
+      ? (req.body.isOptedIn === false || req.body.isOptedIn === 0 ? 0 : 1)
+      : 1;
+
   try {
     await runQuery(
-      `INSERT INTO devices (id, user_id, fcm_token, device_model, last_lat, last_lon, last_accuracy, last_location_time, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO devices (id, user_id, fcm_token, device_model, last_lat, last_lon, last_accuracy, last_location_time, is_opted_in, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         user_id = ?,
          fcm_token = COALESCE(?, fcm_token),
          device_model = COALESCE(?, device_model),
          last_lat = COALESCE(?, last_lat),
          last_lon = COALESCE(?, last_lon),
          last_accuracy = COALESCE(?, last_accuracy),
-         last_location_time = ?,
+         last_location_time = COALESCE(?, last_location_time),
+         is_opted_in = COALESCE(?, is_opted_in),
          updated_at = ?`,
       [
         deviceId,
         userId,
-        fcmToken,
-        deviceModel,
-        latitude || null,
-        longitude || null,
-        accuracy || null,
-        latitude ? now : null,
+        cleanFcmToken,
+        cleanDeviceModel,
+        cleanLat,
+        cleanLon,
+        cleanAcc,
+        locationTime,
+        cleanOptedIn,
         now,
-        fcmToken,
-        deviceModel,
-        latitude || null,
-        longitude || null,
-        accuracy || null,
-        latitude ? now : null,
+        // On conflict update parameters:
+        userId,
+        cleanFcmToken,
+        cleanDeviceModel,
+        cleanLat,
+        cleanLon,
+        cleanAcc,
+        locationTime,
+        cleanOptedIn,
         now,
       ]
     );
@@ -169,10 +278,11 @@ app.post("/api/v1/devices/register", authenticateToken, async (req, res) => {
     res.json({
       success: true,
       deviceId,
+      hasToken: Boolean(cleanFcmToken),
       message: "Device registered and location updated.",
     });
   } catch (err) {
-    console.error("[DEVICE REG ERROR]", err);
+    console.error("[DEVICE REG ERROR]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -262,13 +372,15 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
 
     const stationName = nearestStation ? nearestStation.name : "Central Police Station";
 
+    const senderDeviceId = req.body.deviceId || req.headers["x-device-id"] || null;
+
     // 2. Insert Incident into SQLite
     await runQuery(
       `INSERT INTO incidents (
          id, user_id, user_name, user_phone, status, trigger_source,
          latitude, longitude, location_accuracy, distress_score, distress_classification,
-         nearest_police_station, nearest_police_station_distance, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         nearest_police_station, nearest_police_station_distance, trigger_device_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         incidentId,
         userId,
@@ -282,6 +394,7 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
         distressClassification,
         stationName,
         nearestDist,
+        senderDeviceId,
         now,
         now,
       ]
@@ -296,9 +409,61 @@ app.post("/api/v1/incidents", authenticateToken, async (req, res) => {
       );
     }
 
-    // 3. Query all registered devices within 1.0 km radius (excluding the victim)
-    const allDevices = await allQuery("SELECT * FROM devices WHERE user_id != ?", [userId]);
-    const eligibleRecipients = filterDevicesWithinRadius(latitude, longitude, allDevices, 1.0, userId);
+    // 3. Query all registered devices within 1.0 km radius (excluding the victim's triggering device)
+    let allDevices;
+    if (senderDeviceId) {
+      allDevices = await allQuery("SELECT * FROM devices WHERE id != ?", [senderDeviceId]);
+    } else {
+      allDevices = await allQuery("SELECT * FROM devices WHERE user_id != ?", [userId]);
+    }
+
+    let eligibleRecipients = [];
+    if (
+      latitude !== undefined &&
+      latitude !== null &&
+      longitude !== undefined &&
+      longitude !== null &&
+      !isNaN(Number(latitude)) &&
+      !isNaN(Number(longitude))
+    ) {
+      eligibleRecipients = filterDevicesWithinRadius(
+        latitude,
+        longitude,
+        allDevices,
+        1.0,
+        userId,
+        24 * 60 * 60 * 1000,
+        senderDeviceId
+      );
+    }
+
+    // Emergency Proximity Fallback: If devices haven't locked GPS yet or coordinates are acquiring,
+    // dispatch push alert to active registered citizen devices with valid tokens so help is never dropped.
+    if (eligibleRecipients.length === 0 && allDevices.length > 0) {
+      const activeCandidates = allDevices.filter((d) => {
+        if (!d.fcm_token || typeof d.fcm_token !== "string" || d.fcm_token.trim().length === 0) return false;
+        if (d.is_opted_in === 0 || d.is_opted_in === false) return false;
+        if (senderDeviceId) return d.id !== senderDeviceId;
+        return String(d.user_id) !== String(userId);
+      });
+
+      if (activeCandidates.length > 0) {
+        console.log(`[DURGA DISPATCH] GPS-acquiring emergency broadcast: alerting ${activeCandidates.length} registered candidate device(s)`);
+        const seenTokens = new Set();
+        const seenUsers = new Set();
+        for (const cand of activeCandidates) {
+          if (seenTokens.has(cand.fcm_token)) continue;
+          if (cand.user_id && seenUsers.has(String(cand.user_id))) continue;
+          seenTokens.add(cand.fcm_token);
+          if (cand.user_id) seenUsers.add(String(cand.user_id));
+          eligibleRecipients.push({
+            ...cand,
+            distanceKm: 0.1,
+            locationPending: true,
+          });
+        }
+      }
+    }
 
     // 4. Dispatch Push Notifications
     const incidentObj = {
@@ -842,27 +1007,45 @@ app.get("/api/v1/incidents/active", authenticateToken, requireRole("RESPONDER"),
  */
 app.get("/api/v1/incidents/proximity", authenticateToken, async (req, res) => {
   const { latitude, longitude, radius = 1.0 } = req.query;
+  const callerDeviceId = req.query.excludeDeviceId || req.headers["x-device-id"] || null;
   const callerLat = latitude ? parseFloat(latitude) : null;
   const callerLon = longitude ? parseFloat(longitude) : null;
   const radiusKm = parseFloat(radius);
   const callerUserId = req.user.userId;
 
   try {
-    const incidents = await allQuery(`
+    // 1. Strict 15-minute Time-To-Live (TTL) for active proximity alerts
+    // Any incident created more than 15 minutes ago is STALE and MUST NEVER trigger proximity sirens
+    const activeCutoffTime = Date.now() - (15 * 60 * 1000);
+
+    // 2. Strict caller exclusion:
+    // ALWAYS exclude caller's own incidents by user_id to prevent self-proximity echo alarms.
+    let sql = `
       SELECT * FROM incidents
       WHERE status IN ('ACTIVE', 'REPEAT_ACTIVE', 'ACKNOWLEDGED', 'RESPONDING')
+        AND created_at >= ?
         AND user_id != ?
-      ORDER BY updated_at DESC
-    `, [callerUserId]);
+    `;
+    const params = [activeCutoffTime, callerUserId];
+
+    if (callerDeviceId) {
+      sql += ` AND (trigger_device_id IS NULL OR trigger_device_id != ?)`;
+      params.push(callerDeviceId);
+    }
+    sql += ` ORDER BY updated_at DESC`;
+
+    const incidents = await allQuery(sql, params);
 
     const eligible = [];
     for (const inc of incidents) {
-      let distanceKm = null;
-      if (callerLat !== null && callerLon !== null && inc.latitude !== null && inc.longitude !== null) {
-        distanceKm = calculateHaversineDistanceKm(callerLat, callerLon, inc.latitude, inc.longitude);
+      // 3. Proximity requires valid coordinates on both caller and incident
+      // Never synthesize fake proximity when GPS is unavailable
+      if (callerLat === null || callerLon === null || inc.latitude === null || inc.longitude === null) {
+        continue;
       }
 
-      if (distanceKm === null || distanceKm <= radiusKm) {
+      const distanceKm = calculateHaversineDistanceKm(callerLat, callerLon, inc.latitude, inc.longitude);
+      if (distanceKm <= radiusKm) {
         // Privacy protection: Sanitize sensitive personal info for nearby citizens
         eligible.push({
           id: inc.id,
@@ -876,7 +1059,7 @@ app.get("/api/v1/incidents/proximity", authenticateToken, async (req, res) => {
           nearest_police_station: inc.nearest_police_station,
           created_at: inc.created_at,
           updated_at: inc.updated_at,
-          distanceKm: distanceKm !== null ? parseFloat(distanceKm.toFixed(3)) : 0.35,
+          distanceKm: parseFloat(distanceKm.toFixed(3)),
         });
       }
     }

@@ -156,6 +156,14 @@
                 android:max="30"
                 android:min="10"
                 android:progress="15" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Shake Speed / Window: Very Fast (1.0s) • Fast (1.5s) • Average (2.0s) • Deliberate (3.0s)"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <!-- Touch Pattern Parameters Container -->

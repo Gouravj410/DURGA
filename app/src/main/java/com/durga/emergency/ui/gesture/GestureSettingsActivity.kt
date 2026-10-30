@@ -96,12 +96,12 @@ class GestureSettingsActivity : AppCompatActivity() {
                 val isMatch = similarity >= primary.sensitivityThreshold
 
                 if (isMatch) {
-                    binding.tvTestStatusLabel.text = "✅ TOUCH PATTERN MATCH CONFIRMED (${(similarity * 100).toInt()}%) (Test Mode)"
+                    binding.tvTestStatusLabel.text = "Touch Pattern Verified: ${(similarity * 100).toInt()}% similarity (Test Mode)"
                     binding.tvTestStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.durga_green_safe))
                     binding.drawingViewTest.setStrokeColor(0xFF34D399.toInt())
                     triggerHapticFeedback()
                 } else {
-                    binding.tvTestStatusLabel.text = "❌ Pattern mismatch: ${(similarity * 100).toInt()}% similarity (Requires ${(primary.sensitivityThreshold * 100).toInt()}%)"
+                    binding.tvTestStatusLabel.text = "Pattern mismatch: ${(similarity * 100).toInt()}% similarity (Requires ${(primary.sensitivityThreshold * 100).toInt()}%)"
                     binding.tvTestStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.durga_red_bright))
                     binding.drawingViewTest.setStrokeColor(0xFFEF4444.toInt())
                 }
@@ -121,11 +121,11 @@ class GestureSettingsActivity : AppCompatActivity() {
                     binding.tvTestTelemetry.text = String.format("Peak Acceleration: %.1f m/s² | Repetitions: %d / %d", peakGForce, currentCount, requiredCount)
 
                     if (isMatched) {
-                        binding.tvTestStatusLabel.text = "✅ MOTION GESTURE MATCH CONFIRMED (Test Mode — No SOS)"
+                        binding.tvTestStatusLabel.text = "Motion Gesture Sequence Verified (Test Mode — No Alert Dispatched)"
                         binding.tvTestStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.durga_green_safe))
                         triggerHapticFeedback()
                     } else {
-                        binding.tvTestStatusLabel.text = "⚡ Shake detected: $currentCount / $requiredCount deliberate shakes"
+                        binding.tvTestStatusLabel.text = "Motion detected: Cycle $currentCount of $requiredCount shakes"
                         binding.tvTestStatusLabel.setTextColor(ContextCompat.getColor(this, R.color.durga_amber_warning))
                     }
                 }
@@ -264,8 +264,8 @@ class GestureSettingsActivity : AppCompatActivity() {
         // SeekBars setup
         sbSensitivity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val value = progress.coerceAtLeast(8)
-                tvSensitivity.text = "Acceleration Sensitivity: $value.0 m/s²"
+                val value = progress.coerceAtLeast(16)
+                tvSensitivity.text = "Dynamic Acceleration Threshold: $value.0 m/s²"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -283,7 +283,13 @@ class GestureSettingsActivity : AppCompatActivity() {
         sbWindow.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val sec = progress / 10.0f
-                tvWindow.text = String.format("Time Window: %.1f seconds", sec)
+                val speedDesc = when {
+                    sec <= 1.2f -> "Very Fast"
+                    sec <= 1.8f -> "Fast"
+                    sec <= 2.4f -> "Average"
+                    else -> "Deliberate"
+                }
+                tvWindow.text = String.format("Time Window: %.1f seconds (%s)", sec, speedDesc)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -301,7 +307,7 @@ class GestureSettingsActivity : AppCompatActivity() {
                 val isPrimary = cbSetPrimary.isChecked
 
                 val newGesture = if (isMotion) {
-                    val sens = sbSensitivity.progress.coerceAtLeast(8).toFloat()
+                    val sens = sbSensitivity.progress.coerceAtLeast(16).toFloat()
                     val count = sbCount.progress.coerceAtLeast(2)
                     val window = (sbWindow.progress.coerceAtLeast(10) * 100L)
                     GestureConfig(

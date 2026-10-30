@@ -1,26 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Brand & Emergency System Palette -->
-    <color name="durga_dark_bg">#0B1120</color>
-    <color name="durga_surface_dark">#131D31</color>
-    <color name="durga_card_bg">#1E293B</color>
-    <color name="durga_card_border">#334155</color>
+    <!-- Authentic Defense Obsidian & Glass Palette -->
+    <color name="durga_dark_bg">#090C12</color>
+    <color name="durga_surface_dark">#101520</color>
+    <color name="durga_card_bg">#151C2B</color>
+    <color name="durga_card_elevated">#1A2336</color>
+    <color name="durga_card_border">#253046</color>
+    <color name="durga_card_border_subtle">#1A2336</color>
     
-    <!-- Emergency Status Colors -->
+    <!-- Emergency State Palette (Authoritative & Urgent) -->
     <color name="durga_red_primary">#DC2626</color>
     <color name="durga_red_bright">#EF4444</color>
-    <color name="durga_red_glow">#4C1D1D</color>
-    <color name="durga_green_safe">#10B981</color>
-    <color name="durga_amber_warning">#F59E0B</color>
-    <color name="durga_blue_accent">#38BDF8</color>
+    <color name="durga_red_crimson">#BE123C</color>
+    <color name="durga_red_glow">#4C1118</color>
+    <color name="durga_red_surface">#2A1016</color>
     
-    <!-- Text Colors -->
+    <!-- Verified Safe / Protected Emerald -->
+    <color name="durga_green_safe">#10B981</color>
+    <color name="durga_green_emerald">#059669</color>
+    <color name="durga_green_surface">#064E3B</color>
+    <color name="durga_green_subtle">#0B2E24</color>
+    
+    <!-- Warning Amber -->
+    <color name="durga_amber_warning">#F59E0B</color>
+    <color name="durga_amber_surface">#451A03</color>
+    
+    <!-- High-Trust Civic & Tech Accents -->
+    <color name="durga_blue_accent">#0284C7</color>
+    <color name="durga_blue_bright">#38BDF8</color>
+    <color name="durga_blue_surface">#0C4A6E</color>
+    <color name="durga_blue_subtle">#082F49</color>
+    
+    <!-- High-Legibility Typography -->
     <color name="text_primary">#F8FAFC</color>
     <color name="text_secondary">#94A3B8</color>
     <color name="text_muted">#64748B</color>
-    <color name="text_inverse">#0F172A</color>
+    <color name="text_inverse">#090C12</color>
+    <color name="text_label">#CBD5E1</color>
     
-    <!-- Base Material -->
+    <!-- Standard Tokens -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

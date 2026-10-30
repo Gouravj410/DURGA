@@ -147,17 +147,22 @@ class DurgaSafetyService : Service() {
                 try {
                     if (prefs.isLoggedIn) {
                         val loc = locationProvider.getCurrentLocation()
+                        val myUserId = prefs.userId
                         val result = apiClient.getNearbyIncidents(
                             latitude = loc?.latitude,
                             longitude = loc?.longitude,
                             radiusKm = 1.0,
-                            excludeUserId = prefs.userId
+                            excludeUserId = myUserId,
+                            excludeDeviceId = prefs.deviceId
                         )
 
                         if (result.isSuccess) {
                             val incidents = result.getOrNull() ?: emptyList()
-                            val active = incidents.firstOrNull {
-                                it.status in listOf("ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING")
+                            val now = System.currentTimeMillis()
+                            val active = incidents.firstOrNull { inc ->
+                                inc.status in listOf("ACTIVE", "REPEAT_ACTIVE", "ACKNOWLEDGED", "RESPONDING")
+                                    && inc.userId != myUserId
+                                    && (now - inc.timestamp) < (15 * 60 * 1000L)
                             }
 
                             if (active != null) {

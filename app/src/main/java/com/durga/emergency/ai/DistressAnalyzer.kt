@@ -29,14 +29,14 @@ class DurgaScoringDistressAnalyzer : DistressAnalyzer {
 
     override suspend fun analyzeAudioFile(audioFile: File): DistressResult = withContext(Dispatchers.Default) {
         if (!audioFile.exists() || audioFile.length() <= WAV_HEADER_SIZE) {
-            Log.w(TAG, "Audio file missing or empty. Using default emergency trigger baseline.")
+            Log.w(TAG, "Audio file missing or empty. Treating acoustic evidence as inconclusive.")
             return@withContext DistressResult(
-                score = 0.85f,
-                classification = "High Distress (Emergency Trigger Verified)",
-                confidence = 0.90f,
+                score = 0.25f,
+                classification = "Inconclusive Acoustic Evidence (Ambient / Awaiting User Confirmation)",
+                confidence = 0.50f,
                 detectedSignals = listOf(
-                    "Sensor Gesture Trigger Verified",
-                    "Acoustic Capture Fallback Activated"
+                    "No Acoustic Distress Detected",
+                    "Acoustic Verification Inconclusive"
                 ),
                 timestamp = System.currentTimeMillis()
             )
@@ -126,10 +126,10 @@ class DurgaScoringDistressAnalyzer : DistressAnalyzer {
 
     private fun createFallbackResult(reason: String): DistressResult {
         return DistressResult(
-            score = 0.80f,
-            classification = "High Distress (Sensor Escalation)",
-            confidence = 0.85f,
-            detectedSignals = listOf("Acoustic Fallback", reason),
+            score = 0.30f,
+            classification = "Inconclusive Acoustic Evidence ($reason)",
+            confidence = 0.50f,
+            detectedSignals = listOf("Acoustic Inconclusive", reason),
             timestamp = System.currentTimeMillis()
         )
     }

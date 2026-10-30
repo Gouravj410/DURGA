@@ -23,7 +23,8 @@ class CustomGestureDetector(
 
     companion object {
         private const val TAG = "CUSTOM_GESTURE_DETECTOR"
-        private const val MIN_SLOP_TIME_MS = 250L // Minimum debounce between directional reversals
+        private const val MIN_SLOP_TIME_MS = 150L // Minimum debounce between directional reversals (~6.6 Hz max)
+        private const val GRAVITY_ALPHA = 0.82f   // IIR filter factor isolating static 1g Earth gravity
     }
 
     var isTestMode: Boolean = false
@@ -33,6 +34,21 @@ class CustomGestureDetector(
     private var shakeCount: Int = 0
     private var peakGForceObserved: Float = 0f
 
+    // Dynamic gravity isolation state
+    private val gravity = FloatArray(3) { 0f }
+    private var hasGravityEstimate = false
+
+    // Alternating directional reversal tracking
+    private var lastPeakSign: Int = 0 // +1 or -1 on dominant axis
+
+    fun reset() {
+        shakeCount = 0
+        lastPeakSign = 0
+        lastShakeTimestamp = 0L
+        peakGForceObserved = 0f
+        hasGravityEstimate = false
+    }
+
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         // No-op
     }
@@ -41,38 +57,66 @@ class CustomGestureDetector(
         if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
         if (config.type != GestureType.MOTION_SHAKE_SEQUENCE || !config.isEnabled) return
 
-        val x = event.values[0]
-        val y = event.values[1]
-        val z = event.values[2]
+        // 1. Isolate dynamic linear acceleration by separating static 1g Earth gravity
+        if (!hasGravityEstimate) {
+            gravity[0] = event.values[0]
+            gravity[1] = event.values[1]
+            gravity[2] = event.values[2]
+            hasGravityEstimate = true
+            return
+        }
 
-        // Compute total g-force (normalized against Earth's gravity 9.80665 m/s^2)
-        val gX = x / SensorManager.GRAVITY_EARTH
-        val gY = y / SensorManager.GRAVITY_EARTH
-        val gZ = z / SensorManager.GRAVITY_EARTH
-        val gForce = sqrt((gX * gX + gY * gY + gZ * gZ).toDouble()).toFloat()
-        val accelerationMs2 = gForce * SensorManager.GRAVITY_EARTH
+        gravity[0] = GRAVITY_ALPHA * gravity[0] + (1 - GRAVITY_ALPHA) * event.values[0]
+        gravity[1] = GRAVITY_ALPHA * gravity[1] + (1 - GRAVITY_ALPHA) * event.values[1]
+        gravity[2] = GRAVITY_ALPHA * gravity[2] + (1 - GRAVITY_ALPHA) * event.values[2]
 
-        if (accelerationMs2 > peakGForceObserved) {
-            peakGForceObserved = accelerationMs2
+        val linearX = event.values[0] - gravity[0]
+        val linearY = event.values[1] - gravity[1]
+        val linearZ = event.values[2] - gravity[2]
+
+        // Dynamic linear acceleration magnitude (at rest on table = 0.0 m/s², picking up = ~2.0 m/s²)
+        val dynamicMagnitude = sqrt((linearX * linearX + linearY * linearY + linearZ * linearZ).toDouble()).toFloat()
+
+        if (dynamicMagnitude > peakGForceObserved) {
+            peakGForceObserved = dynamicMagnitude
         }
 
         val now = System.currentTimeMillis()
 
-        // Check if acceleration exceeds user-configured sensitivity threshold
-        if (accelerationMs2 >= config.sensitivityThreshold) {
-            // Ignore movements that occur too rapidly to be deliberate
+        // 2. Check if dynamic acceleration exceeds configured sensitivity threshold
+        if (dynamicMagnitude >= config.sensitivityThreshold) {
+            // Debounce movements occurring too rapidly to be intentional physical gestures
             if (now - lastShakeTimestamp < MIN_SLOP_TIME_MS) {
                 return
             }
 
-            // Reset sequence if window duration expired
+            // Reset sequence if the sequence window expired
             if (now - lastShakeTimestamp > config.windowDurationMs) {
                 shakeCount = 0
-                peakGForceObserved = accelerationMs2
+                lastPeakSign = 0
+                peakGForceObserved = dynamicMagnitude
             }
 
+            // 3. Directional sign reversal verification:
+            // A true physical shake reverses direction (e.g. +X -> -X -> +X).
+            // Unidirectional movements (lifting phone, rotating, setting on table) do NOT qualify.
+            val absX = kotlin.math.abs(linearX)
+            val absY = kotlin.math.abs(linearY)
+            val absZ = kotlin.math.abs(linearZ)
+            val dominantAxisVal = if (absX > absY) {
+                if (absX > absZ) linearX else linearZ
+            } else {
+                if (absY > absZ) linearY else linearZ
+            }
+            val currentSign = if (dominantAxisVal >= 0f) 1 else -1
+
+            val isDirectionalReversal = (lastPeakSign != 0 && currentSign != lastPeakSign)
+            lastPeakSign = currentSign
             lastShakeTimestamp = now
-            shakeCount++
+
+            if (isDirectionalReversal || shakeCount == 0) {
+                shakeCount++
+            }
 
             val isMatch = shakeCount >= config.repetitionCount
             val confidence = min(1.0f, (peakGForceObserved / max(1.0f, config.sensitivityThreshold)))
@@ -81,6 +125,7 @@ class CustomGestureDetector(
                 onTestFeedback?.invoke(peakGForceObserved, shakeCount, config.repetitionCount, isMatch)
                 if (isMatch) {
                     shakeCount = 0
+                    lastPeakSign = 0
                     peakGForceObserved = 0f
                     Log.d(TAG, "Test mode: Gesture matched with confidence $confidence (No SOS triggered)")
                 }
@@ -90,11 +135,12 @@ class CustomGestureDetector(
             // Normal SOS trigger mode with cooldown protection
             if (isMatch) {
                 shakeCount = 0
+                lastPeakSign = 0
                 peakGForceObserved = 0f
 
                 if (now - lastTriggerTimestamp >= config.cooldownDurationMs) {
                     lastTriggerTimestamp = now
-                    Log.i(TAG, "SOS Gesture Confirmed: ${config.name} (Threshold: ${config.sensitivityThreshold} m/s², Count: ${config.repetitionCount})")
+                    Log.i(TAG, "SOS Gesture Confirmed: ${config.name} (Dynamic Threshold: ${config.sensitivityThreshold} m/s², Count: ${config.repetitionCount})")
                     onGestureMatched(config, confidence)
                 } else {
                     Log.d(TAG, "Gesture match suppressed by cooldown (${config.cooldownDurationMs}ms)")
@@ -171,11 +217,5 @@ class CustomGestureDetector(
             length += hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
         }
         return if (length <= 0f) 0.001f else length
-    }
-
-    fun reset() {
-        shakeCount = 0
-        peakGForceObserved = 0f
-        lastShakeTimestamp = 0L
     }
 }
