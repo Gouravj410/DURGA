@@ -18,7 +18,14 @@ Write-Host "`n[1/6] Checking DURGA Central Backend Service on port 3000..." -For
 $backendActive = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
 if (-not $backendActive) {
     Write-Host "  -> Starting DURGA backend server in background..." -ForegroundColor Green
-    Start-Process node -ArgumentList "server.js" -WorkingDirectory "$PSScriptRoot\backend" -WindowStyle Hidden
+    $backendDir = "$PSScriptRoot\backend"
+    $env:PM2_HOME = "$backendDir\.pm2"
+    $pm2Cmd = "$backendDir\node_modules\.bin\pm2.cmd"
+    if (Test-Path $pm2Cmd) {
+        Start-Process -FilePath $pm2Cmd -ArgumentList "start ecosystem.config.js" -WorkingDirectory $backendDir -WindowStyle Hidden
+    } else {
+        Start-Process node -ArgumentList "server.js" -WorkingDirectory $backendDir -WindowStyle Hidden
+    }
     Start-Sleep -Seconds 2
 } else {
     Write-Host "  -> DURGA backend server is already running on http://localhost:3000" -ForegroundColor Green
